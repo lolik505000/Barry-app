@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Барри</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --curtain: #9E3232;
+    --curtain-text: #FFD700;
+    --bg: #163420;
+    --bg-soft: #1E4429;
+    --card: #1B3D26;
+    --card-border: #2E5A3B;
+    --text: #F4F4F0;
+    --text-dim: #C9D6CC;
+    --accent: #FFD700;
+    --danger: #C24B4B;
+    --radius: 14px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;}
+  body{padding-top:96px; padding-bottom:78px; min-height:100vh;}
+
+  /* ===== ШТОРКА (верхняя панель) ===== */
+  #curtain{
+    position:fixed; top:0; left:0; right:0; z-index:50;
+    background:var(--curtain); color:var(--curtain-text);
+    padding:10px 14px; display:flex; align-items:center; justify-content:space-between;
+    box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
+  #curtain .brand{display:flex; align-items:center; gap:10px;}
+  #curtain .logo{width:42px; height:42px; border-radius:10px; background:rgba(255,215,0,.12); display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;}
+  #curtain .logo svg{width:100%; height:100%;}
+  #curtain .titles{display:flex; flex-direction:column; line-height:1.15;}
+  #curtain .titles b{font-size:17px; letter-spacing:.5px;}
+  #curtain .titles span{font-size:11px; opacity:.85; font-weight:600;}
+  #curtain .gear{width:38px; height:38px; border-radius:10px; border:1.5px solid var(--curtain-text); background:transparent; color:var(--curtain-text); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:18px;}
+  #curtain .gear.on{background:var(--curtain-text); color:var(--curtain);}
+  #tabsRow{
+    position:fixed; top:62px; left:0; right:0; z-index:49;
+    background:var(--curtain); display:flex; gap:6px; padding:0 10px 8px 10px; overflow-x:auto;
+  }
+  #tabsRow::-webkit-scrollbar{display:none;}
+  .tab-btn{
+    flex:0 0 auto; padding:7px 13px; border-radius:999px; border:1.5px solid rgba(255,215,0,.4);
+    background:transparent; color:var(--curtain-text); font-size:12.5px; font-weight:700; white-space:nowrap; cursor:pointer;
+  }
+  .tab-btn.active{background:var(--curtain-text); color:var(--curtain); border-color:var(--curtain-text);}
+
+  main{padding:14px;}
+  .hidden{display:none !important;}
+
+  h2.section-title{font-size:19px; margin:2px 0 12px 0; letter-spacing:.3px; display:flex; align-items:center; justify-content:space-between;}
+  .subtabs{display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;}
+  .subtab{padding:6px 12px; border-radius:999px; background:var(--bg-soft); border:1px solid var(--card-border); color:var(--text-dim); font-size:12.5px; font-weight:600; cursor:pointer;}
+  .subtab.active{background:var(--accent); color:#2b2200; border-color:var(--accent);}
+
+  .card{background:var(--card); border:1px solid var(--card-border); border-radius:var(--radius); padding:13px 14px; margin-bottom:10px;}
+  .card h3{margin:0 0 4px 0; font-size:15.5px;}
+  .card p{margin:4px 0; font-size:13.5px; color:var(--text-dim); line-height:1.45;}
+  .chip{display:inline-block; background:rgba(255,215,0,.14); color:var(--accent); border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; margin:2px 4px 2px 0;}
+  .card .meta{display:flex; flex-wrap:wrap; margin-top:6px;}
+  .card .actions{display:flex; gap:8px; margin-top:10px;}
+  .card img.thumb{width:100%; border-radius:10px; margin-top:8px; display:block;}
+  .empty{color:var(--text-dim); font-size:13.5px; text-align:center; padding:30px 10px; border:1.5px dashed var(--card-border); border-radius:var(--radius);}
+
+  button.btn{border:none; border-radius:10px; padding:9px 14px; font-weight:700; font-size:13px; cursor:pointer;}
+  button.btn-primary{background:var(--accent); color:#2b2200;}
+  button.btn-outline{background:transparent; color:var(--text); border:1.5px solid var(--card-border);}
+  button.btn-danger{background:transparent; color:var(--danger); border:1.5px solid var(--danger);}
+  button.btn-sm{padding:6px 10px; font-size:12px;}
+  .fab{position:fixed; right:16px; bottom:92px; z-index:40; width:52px; height:52px; border-radius:50%; background:var(--accent); color:#2b2200; font-size:26px; border:none; box-shadow:0 6px 16px rgba(0,0,0,.4); cursor:pointer;}
+
+  #bottomNav{position:fixed; bottom:0; left:0; right:0; background:var(--bg-soft); border-top:1px solid var(--card-border); display:flex; z-index:45;}
+  #bottomNav button{flex:1; background:none; border:none; color:var(--text-dim); padding:9px 2px 8px; font-size:10.5px; display:flex; flex-direction:column; align-items:center; gap:3px; cursor:pointer;}
+  #bottomNav button span.ic{font-size:19px;}
+  #bottomNav button.active{color:var(--accent);}
+
+  /* modal */
+  #modalOverlay{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:100; display:flex; align-items:flex-end; justify-content:center;}
+  #modal{background:var(--bg-soft); width:100%; max-width:520px; max-height:88vh; overflow-y:auto; border-radius:18px 18px 0 0; padding:16px 16px 22px;}
+  #modal h3{margin:0 0 12px 0;}
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:12px; color:var(--text-dim); margin-bottom:5px; font-weight:600;}
+  .field input[type=text], .field input[type=number], .field textarea, .field select{
+    width:100%; background:var(--bg); border:1.5px solid var(--card-border); color:var(--text); border-radius:10px; padding:9px 11px; font-size:14px; font-family:inherit;
+  }
+  .field textarea{min-height:70px; resize:vertical;}
+  .chipselect{display:flex; flex-wrap:wrap; gap:7px;}
+  .chipselect .opt{padding:6px 11px; border-radius:999px; border:1.5px solid var(--card-border); font-size:12.5px; cursor:pointer; color:var(--text-dim);}
+  .chipselect .opt.sel{background:var(--accent); color:#2b2200; border-color:var(--accent);}
+  .modal-actions{display:flex; gap:10px; margin-top:14px;}
+  .modal-actions button{flex:1;}
+  .photo-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;}
+  .photo-row img{width:70px; height:70px; object-fit:cover; border-radius:8px; border:1.5px solid var(--card-border);}
+  .photo-row .rm{position:relative;}
+  .photo-row .rm button{position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%; background:var(--danger); color:#fff; border:none; font-size:12px; line-height:1;}
+
+  .adminOnly{display:none;}
+  body.admin .adminOnly{display:inline-flex;}
+  body.admin .adminOnly.block{display:block;}
+
+  .banner{background:rgba(255,215,0,.1); border:1px solid rgba(255,215,0,.35); color:var(--accent); font-size:12px; padding:8px 12px; border-radius:10px; margin-bottom:12px;}
+
+  .prod-line{display:flex; align-items:center; gap:10px; background:var(--card); border:1px solid var(--card-border); border-radius:10px; padding:9px 11px; margin-bottom:7px;}
+  .prod-line .info{flex:1;}
+  .prod-line .info b{font-size:13.5px; display:block;}
+  .prod-line .info span{font-size:11.5px; color:var(--text-dim);}
+  .prod-line input.qty{width:58px; text-align:center; background:var(--bg); border:1.5px solid var(--card-border); color:var(--text); border-radius:8px; padding:6px 4px; font-size:13px;}
+  .group-block{margin-bottom:16px;}
+  .group-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
+  .group-head h3{margin:0; font-size:15px; color:var(--accent);}
+  .subgroup-title{font-size:12.5px; color:var(--text-dim); font-weight:700; margin:8px 0 6px 2px; text-transform:uppercase; letter-spacing:.4px;}
+  #shopResult{white-space:pre-wrap; background:var(--card); border:1px solid var(--card-border); border-radius:10px; padding:12px; font-size:13px; line-height:1.6; margin-top:12px;}
+</style>
+</head>
+<body>
+
+<div id="curtain">
+  <div class="brand">
+    <div class="logo" id="logoSlot">
+      <svg width="130" height="130" viewBox="0 0 130 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="130" height="130" fill="#9E3232"/>
+        <path d="M31.868 98.001V88.047H38.378V88.887H33.94V91.911H35.578C37.3 91.911 38.56 92.569 39.092 93.689C39.274 94.067 39.358 94.459 39.358 94.921C39.358 96.475 38.392 97.371 37.146 97.777C36.684 97.931 36.152 98.001 35.578 98.001H31.868ZM33.94 97.175H35.578C36.614 97.175 37.3 96.363 37.3 94.879C37.3 93.437 36.586 92.751 35.578 92.751H33.94V97.175ZM40.2257 96.041C40.2257 94.305 41.7657 93.717 43.6417 93.717H44.5237V93.031C44.5237 91.869 44.1737 91.197 43.4317 91.197C42.8157 91.197 42.3677 91.701 42.3677 92.653H40.3937C40.3937 91.967 40.7997 91.449 41.2477 91.113C41.7937 90.707 42.5777 90.469 43.5437 90.469C44.9157 90.469 45.8537 90.987 46.2877 91.939C46.4417 92.261 46.5117 92.639 46.5117 93.073V96.209C46.5117 96.895 46.5957 97.427 46.8057 97.889V98.001H44.8037C44.7057 97.889 44.6497 97.763 44.6077 97.595C44.2157 97.903 43.6137 98.141 42.7457 98.141C41.6117 98.141 40.7997 97.609 40.4217 96.881C40.2957 96.629 40.2257 96.349 40.2257 96.041ZM42.1997 96.055C42.1997 96.853 42.6337 97.385 43.1797 97.385C43.8097 97.385 44.2997 96.909 44.5237 96.279V94.305H43.7117C42.8577 94.305 42.1997 94.781 42.1997 96.055ZM48.0255 100.843V90.609H49.8595L49.9295 91.029C50.3495 90.693 50.9095 90.469 51.8055 90.469C53.3595 90.469 54.1575 91.435 54.4935 92.681C54.6195 93.143 54.6895 93.661 54.6895 94.221V94.375C54.6895 96.027 54.1155 97.287 53.0515 97.861C52.7015 98.057 52.2815 98.141 51.8195 98.141C50.9795 98.141 50.4195 97.973 49.9995 97.749V100.843H48.0255ZM49.9995 96.349C50.2235 96.951 50.6295 97.343 51.3015 97.343C52.4075 97.343 52.7155 95.901 52.7155 94.403V94.193C52.7155 92.695 52.3935 91.281 51.2875 91.281C50.6155 91.281 50.2375 91.645 49.9995 92.233V96.349ZM59.4852 98.001V88.047H65.9952V88.887H61.5572V91.911H63.1952C64.9172 91.911 66.1772 92.569 66.7092 93.689C66.8912 94.067 66.9752 94.459 66.9752 94.921C66.9752 96.475 66.0092 97.371 64.7632 97.777C64.3012 97.931 63.7692 98.001 63.1952 98.001H59.4852ZM61.5572 97.175H63.1952C64.2312 97.175 64.9172 96.363 64.9172 94.879C64.9172 93.437 64.2032 92.751 63.1952 92.751H61.5572V97.175ZM67.8429 96.041C67.8429 94.305 69.3829 93.717 71.2589 93.717H72.1409V93.031C72.1409 91.869 71.7909 91.197 71.0489 91.197C70.4329 91.197 69.9849 91.701 69.9849 92.653H68.0109C68.0109 91.967 68.4169 91.449 68.8649 91.113C69.4109 90.707 70.1949 90.469 71.1609 90.469C72.5329 90.469 73.4709 90.987 73.9049 91.939C74.0589 92.261 74.1289 92.639 74.1289 93.073V96.209C74.1289 96.895 74.2129 97.427 74.4229 97.889V98.001H72.4209C72.3229 97.889 72.2669 97.763 72.2249 97.595C71.8329 97.903 71.2309 98.141 70.3629 98.141C69.2289 98.141 68.4169 97.609 68.0389 96.881C67.9129 96.629 67.8429 96.349 67.8429 96.041ZM69.8169 96.055C69.8169 96.853 70.2509 97.385 70.7969 97.385C71.4269 97.385 71.9169 96.909 72.1409 96.279V94.305H71.3289C70.4749 94.305 69.8169 94.781 69.8169 96.055ZM75.6427 100.843V90.609H77.4767L77.5467 91.029C77.9667 90.693 78.5267 90.469 79.4227 90.469C80.9767 90.469 81.7747 91.435 82.1107 92.681C82.2367 93.143 82.3067 93.661 82.3067 94.221V94.375C82.3067 96.027 81.7327 97.287 80.6687 97.861C80.3187 98.057 79.8987 98.141 79.4367 98.141C78.5967 98.141 78.0367 97.973 77.6167 97.749V100.843H75.6427ZM77.6167 96.349C77.8407 96.951 78.2467 97.343 78.9187 97.343C80.0247 97.343 80.3327 95.901 80.3327 94.403V94.193C80.3327 92.695 80.0107 91.281 78.9047 91.281C78.2327 91.281 77.8547 91.645 77.6167 92.233V96.349ZM83.504 100.843V90.609H85.338L85.408 91.029C85.828 90.693 86.388 90.469 87.284 90.469C88.838 90.469 89.636 91.435 89.972 92.681C90.098 93.143 90.168 93.661 90.168 94.221V94.375C90.168 96.027 89.594 97.287 88.53 97.861C88.18 98.057 87.76 98.141 87.298 98.141C86.458 98.141 85.898 97.973 85.478 97.749V100.843H83.504ZM85.478 96.349C85.702 96.951 86.108 97.343 86.78 97.343C87.886 97.343 88.194 95.901 88.194 94.403V94.193C88.194 92.695 87.872 91.281 86.766 91.281C86.094 91.281 85.716 91.645 85.478 92.233V96.349ZM91.3654 98.001V90.609H93.3534V95.159L95.8314 90.609H97.8054V98.001H95.8314V93.437L93.3534 98.001H91.3654Z" fill="#FFD700"/>
+        <path d="M50.984 62.001V39.249H65.864V41.169H55.72V48.081H59.464C63.4 48.081 66.28 49.585 67.496 52.145C67.912 53.009 68.104 53.905 68.104 54.961C68.104 58.513 65.896 60.561 63.048 61.489C61.992 61.841 60.776 62.001 59.464 62.001H50.984ZM55.72 60.113H59.464C61.832 60.113 63.4 58.257 63.4 54.865C63.4 51.569 61.768 50.001 59.464 50.001H55.72V60.113Z" fill="#FFD700"/>
+        <path d="M63.984 67.001V44.249H78.864V46.169H68.72V53.081H72.464C76.4 53.081 79.28 54.585 80.496 57.145C80.912 58.009 81.104 58.905 81.104 59.961C81.104 63.513 78.896 65.561 76.048 66.489C74.992 66.841 73.776 67.001 72.464 67.001H63.984ZM68.72 65.113H72.464C74.832 65.113 76.4 63.257 76.4 59.865C76.4 56.569 74.768 55.001 72.464 55.001H68.72V65.113Z" fill="#FFD700"/>
+        <ellipse cx="40.0949" cy="33.4601" rx="5.39171" ry="1.72073" transform="rotate(-57.0403 40.0949 33.4601)" fill="#FFD700"/>
+        <ellipse cx="38.5195" cy="41.3837" rx="5.39171" ry="1.72073" transform="rotate(-38.9347 38.5195 41.3837)" fill="#FFD700"/>
+        <ellipse cx="34.797" cy="36.1028" rx="5.39171" ry="1.72073" transform="rotate(-87.0685 34.797 36.1028)" fill="#FFD700"/>
+        <ellipse cx="31.5037" cy="41.9033" rx="5.39171" ry="1.72073" transform="rotate(-102.127 31.5037 41.9033)" fill="#FFD700"/>
+        <ellipse cx="29.1546" cy="46.7302" rx="5.39171" ry="1.72073" transform="rotate(-119.536 29.1546 46.7302)" fill="#FFD700"/>
+        <ellipse cx="35.0615" cy="49.6834" rx="5.39171" ry="1.72073" transform="rotate(-64.4499 35.0615 49.6834)" fill="#FFD700"/>
+        <ellipse cx="29.8878" cy="54.0276" rx="5.39171" ry="1.72073" transform="rotate(55.4372 29.8878 54.0276)" fill="#FFD700"/>
+        <ellipse cx="36.2875" cy="59.5783" rx="5.39171" ry="1.72073" transform="rotate(80.0009 36.2875 59.5783)" fill="#FFD700"/>
+        <ellipse cx="41.9385" cy="66.9274" rx="5.39171" ry="1.72073" transform="rotate(60.3899 41.9385 66.9274)" fill="#FFD700"/>
+        <ellipse cx="35.5685" cy="66.4118" rx="5.39171" ry="1.72073" transform="rotate(27.5904 35.5685 66.4118)" fill="#FFD700"/>
+        <ellipse cx="37.9793" cy="71.5779" rx="5.39171" ry="1.72073" transform="rotate(6.8912 37.9793 71.5779)" fill="#FFD700"/>
+        <ellipse cx="43.7504" cy="75.2877" rx="5.39171" ry="1.72073" transform="rotate(-8.78025 43.7504 75.2877)" fill="#FFD700"/>
+        <ellipse cx="50.527" cy="72.2158" rx="5.39171" ry="1.72073" transform="rotate(37.4145 50.527 72.2158)" fill="#FFD700"/>
+        <ellipse cx="49.1593" cy="78.0362" rx="5.39171" ry="1.72073" transform="rotate(-9.99424 49.1593 78.0362)" fill="#FFD700"/>
+        <ellipse cx="58.4947" cy="79.5485" rx="5.39171" ry="1.72073" transform="rotate(3.24407 58.4947 79.5485)" fill="#FFD700"/>
+        <ellipse cx="59.7849" cy="75.4078" rx="5.39171" ry="1.72073" transform="rotate(25.1657 59.7849 75.4078)" fill="#FFD700"/>
+        <ellipse cx="30.4165" cy="59.6833" rx="5.39171" ry="1.72073" transform="rotate(34.5702 30.4165 59.6833)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.544049 -0.839054 -0.839054 0.544049 94.6787 37.0479)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.777863 -0.628434 -0.628434 0.777863 97.1514 43.4336)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.0511428 -0.998691 -0.998691 0.0511428 97.5938 41.4004)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(0.210083 -0.977683 -0.977683 -0.210083 99.4414 47.5361)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(0.492971 -0.870046 -0.870046 -0.492971 100.08 52.2695)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.4313 -0.902208 -0.902208 0.4313 99.2129 53.8057)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.567309 0.823505 0.823505 0.567309 102.149 48.6113)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.173632 0.984811 0.984811 0.173632 93.3506 53.9707)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.494095 0.869408 0.869408 0.494095 89.625 61.3906)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.886281 0.463147 0.463147 0.886281 98.8086 62.3896)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.992776 0.119984 0.119984 0.992776 97.5635 69.2227)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.988281 -0.152645 -0.152645 0.988281 92.2373 74.4102)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.794261 0.607576 0.607576 0.794261 83.1064 67.5732)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.984825 -0.173549 -0.173549 0.984825 86.8457 77.2773)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.998398 0.0565894 0.0565894 0.998398 77.1914 77.5264)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.905082 0.425238 0.425238 0.905082 74.7627 71.5586)" fill="#FFD700"/>
+        <ellipse cx="5.39171" cy="1.72073" rx="5.39171" ry="1.72073" transform="matrix(-0.823431 0.567416 0.567416 0.823431 103.443 55.207)" fill="#FFD700"/>
+      </svg>
+    </div>
+    <div class="titles">
+      <b>БАРРИ</b>
+      <span id="modeLabel">гость</span>
+    </div>
+  </div>
+  <button class="gear" id="adminToggle" title="Админ-режим">⚙</button>
+</div>
+
+<div id="tabsRow"></div>
+
+<main id="main"></main>
+
+<button class="fab hidden adminOnly" id="fabAdd">+</button>
+
+<div id="bottomNav">
+  <button data-tab="techcards" class="active"><span class="ic">📋</span>Тех.карты</button>
+  <button data-tab="druzhba"><span class="ic">🤝</span>Дружба</button>
+  <button data-tab="vodvore"><span class="ic">🍹</span>Во дворе</button>
+  <button data-tab="procurement"><span class="ic">🛒</span>Закупки</button>
+</div>
+
+<script>
+/* ==================== НАСТРОЙКИ ==================== */
+// Впиши сюда Telegram ID бартендеров, у которых должны быть права администратора
+const ADMIN_IDS = [1066237617]; // <-- ЗАМЕНИ на реальные Telegram ID
+
+const TASTE_TAGS = ["сладкий","кислый","горький","освежающий","крепкий","фруктовый","пряный","сливочный"];
+const DRUZHBA_CATS = [{id:"food", label:"Еда"}, {id:"wine", label:"Вино"}];
+
+const STORAGE_KEY = "barry-shared-data";
+
+const DEFAULT_DATA = {
+  techcards: [],
+  druzhba: [],   // {id, cat: 'food'|'wine', title, text}
+  vodvore: [],   // {id, name, tastes:[], composition, text}
+  procurement: { groups: [] } // {id,name, subgroups:[{id,name, products:[{id,name,unit,comment}]}]}
+};
+
+/* ==================== ХРАНИЛИЩЕ ==================== */
+let usingCloud = !!(window.storage && window.storage.get);
+let DATA = JSON.parse(JSON.stringify(DEFAULT_DATA));
+
+async function loadData(){
+  try{
+    if(usingCloud){
+      const res = await window.storage.get(STORAGE_KEY, true);
+      if(res && res.value){ DATA = JSON.parse(res.value); return; }
+    } else {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){ DATA = JSON.parse(raw); return; }
+    }
+  }catch(e){ /* ключа ещё нет — используем DEFAULT_DATA */ }
+  DATA = JSON.parse(JSON.stringify(DEFAULT_DATA));
+}
+
+async function saveData(){
+  const str = JSON.stringify(DATA);
+  try{
+    if(usingCloud){
+      await window.storage.set(STORAGE_KEY, str, true);
+    } else {
+      localStorage.setItem(STORAGE_KEY, str);
+    }
+  }catch(e){ console.error("Ошибка сохранения", e); alert("Не удалось сохранить данные. Попробуй ещё раз."); }
+}
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+/* ==================== TELEGRAM / АДМИН ==================== */
+let tg = window.Telegram ? window.Telegram.WebApp : null;
+let currentUserId = null;
+let isAdmin = false;
+
+function initTelegram(){
+  if(tg){
+    tg.ready(); tg.expand();
+    const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if(u) currentUserId = u.id;
+  }
+}
+
+function toggleAdmin(){
+  if(isAdmin){ isAdmin = false; applyAdminState(); return; }
+  let idToCheck = currentUserId;
+  if(!idToCheck){
+    const entered = prompt("Не удалось определить Telegram ID автоматически (запусти внутри Telegram).\nДля теста введи свой Telegram ID вручную:");
+    if(!entered) return;
+    idToCheck = parseInt(entered.trim(), 10);
+  }
+  if(ADMIN_IDS.includes(idToCheck)){
+    isAdmin = true;
+    applyAdminState();
+  } else {
+    alert("Этот Telegram ID не в списке администраторов.");
+  }
+}
+
+function applyAdminState(){
+  document.body.classList.toggle("admin", isAdmin);
+  document.getElementById("adminToggle").classList.toggle("on", isAdmin);
+  document.getElementById("modeLabel").textContent = isAdmin ? "режим админа" : "гость";
+  render();
+}
+
+/* ==================== НАВИГАЦИЯ ==================== */
+const TABS = [
+  {id:"techcards", label:"Тех.карты", icon:"📋"},
+  {id:"druzhba", label:"Дружба", icon:"🤝"},
+  {id:"vodvore", label:"Во дворе", icon:"🍹"},
+  {id:"procurement", label:"Закупки", icon:"🛒"},
+];
+let activeTab = "techcards";
+let activeSub = { druzhba:"food" };
+
+document.querySelectorAll("#bottomNav button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{ activeTab = btn.dataset.tab; render(); });
+});
+
+document.getElementById("adminToggle").addEventListener("click", toggleAdmin);
+document.getElementById("fabAdd").addEventListener("click", ()=> openAddModalForTab());
+
+/* ==================== РЕНДЕР ==================== */
+function el(html){ const d=document.createElement("div"); d.innerHTML=html.trim(); return d.firstChild; }
+
+function render(){
+  document.querySelectorAll("#bottomNav button").forEach(b=> b.classList.toggle("active", b.dataset.tab===activeTab));
+  document.getElementById("fabAdd").classList.toggle("hidden", !isAdmin || activeTab==="procurement");
+  const main = document.getElementById("main");
+  main.innerHTML = "";
+  if(activeTab==="techcards") renderTechcards(main);
+  if(activeTab==="druzhba") renderDruzhba(main);
+  if(activeTab==="vodvore") renderVodvore(main);
+  if(activeTab==="procurement") renderProcurement(main);
+}
+
+/* ---------- ТЕХ.КАРТЫ ---------- */
+function renderTechcards(main){
+  main.appendChild(el(`<h2 class="section-title">Тех.карты</h2>`));
+  if(!usingCloud) main.appendChild(el(`<div class="banner">⚠️ Облачное хранилище недоступно в этом окружении — данные сохраняются только локально в этом браузере.</div>`));
+  if(DATA.techcards.length===0){
+    main.appendChild(el(`<div class="empty">Пока нет технологических карт.${isAdmin? ' Нажми «+», чтобы добавить первую.':''}</div>`));
+    return;
+  }
+  DATA.techcards.slice().reverse().forEach(tc=>{
+    const photos = (tc.photos||[]).map(p=>`<img class="thumb" src="${p}">`).join("");
+    const card = el(`
+      <div class="card">
+        <h3>${escapeHtml(tc.name)}</h3>
+        <p>${escapeHtml(tc.ingredients||"")}</p>
+        ${tc.steps? `<p><b>Приготовление:</b> ${escapeHtml(tc.steps)}</p>`:""}
+        ${photos}
+        <div class="actions adminOnly">
+          <button class="btn btn-outline btn-sm" data-edit="${tc.id}">Изменить</button>
+          <button class="btn btn-danger btn-sm" data-del="${tc.id}">Удалить</button>
+        </div>
+      </div>`);
+    card.querySelector('[data-edit]')?.addEventListener('click', ()=> openTechcardModal(tc));
+    card.querySelector('[data-del]')?.addEventListener('click', ()=> deleteItem('techcards', tc.id));
+    main.appendChild(card);
+  });
+}
+
+function openTechcardModal(tc){
+  const editing = !!tc;
+  tc = tc || {id:uid(), name:"", ingredients:"", steps:"", photos:[]};
+  const body = `
+    <h3>${editing? "Изменить тех.карту":"Новая тех.карта"}</h3>
+    <div class="field"><label>Название</label><input type="text" id="f_name" value="${attr(tc.name)}"></div>
+    <div class="field"><label>Ингредиенты / состав</label><textarea id="f_ing">${escapeHtml(tc.ingredients)}</textarea></div>
+    <div class="field"><label>Как готовить</label><textarea id="f_steps">${escapeHtml(tc.steps)}</textarea></div>
+    <div class="field">
+      <label>Фото</label>
+      <input type="file" id="f_photo" accept="image/*" multiple>
+      <div class="photo-row" id="f_photoRow"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Сохранить</button>
+    </div>`;
+  const overlay = openModal(body);
+  let photos = (tc.photos||[]).slice();
+  renderPhotoRow();
+  function renderPhotoRow(){
+    const row = overlay.querySelector('#f_photoRow');
+    row.innerHTML = "";
+    photos.forEach((p,i)=>{
+      const w = el(`<div class="rm"><img src="${p}"><button data-i="${i}">×</button></div>`);
+      w.querySelector('button').addEventListener('click', ()=>{ photos.splice(i,1); renderPhotoRow(); });
+      row.appendChild(w);
+    });
+  }
+  overlay.querySelector('#f_photo').addEventListener('change', async (e)=>{
+    for(const file of e.target.files){
+      const dataUrl = await resizeImage(file);
+      photos.push(dataUrl);
+    }
+    renderPhotoRow();
+  });
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const name = overlay.querySelector('#f_name').value.trim();
+    if(!name){ alert("Укажи название"); return; }
+    tc.name = name;
+    tc.ingredients = overlay.querySelector('#f_ing').value.trim();
+    tc.steps = overlay.querySelector('#f_steps').value.trim();
+    tc.photos = photos;
+    upsert('techcards', tc);
+    await saveData();
+    closeModal(); render();
+  });
+}
+
+function resizeImage(file){
+  return new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 800;
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale; canvas.height = img.height*scale;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.72));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ---------- ДРУЖБА КРЕПКАЯ ---------- */
+function renderDruzhba(main){
+  main.appendChild(el(`<h2 class="section-title">Дружба крепкая</h2>`));
+  const subRow = el(`<div class="subtabs"></div>`);
+  DRUZHBA_CATS.forEach(c=>{
+    const b = el(`<div class="subtab ${activeSub.druzhba===c.id?'active':''}">${c.label}</div>`);
+    b.addEventListener('click', ()=>{ activeSub.druzhba=c.id; render(); });
+    subRow.appendChild(b);
+  });
+  main.appendChild(subRow);
+  const items = DATA.druzhba.filter(x=>x.cat===activeSub.druzhba);
+  if(items.length===0){ main.appendChild(el(`<div class="empty">Пока пусто в разделе «${DRUZHBA_CATS.find(c=>c.id===activeSub.druzhba).label}».</div>`)); return; }
+  items.slice().reverse().forEach(it=>{
+    const card = el(`
+      <div class="card">
+        <h3>${escapeHtml(it.title)}</h3>
+        <p>${escapeHtml(it.text)}</p>
+        <div class="actions adminOnly">
+          <button class="btn btn-outline btn-sm" data-edit="${it.id}">Изменить</button>
+          <button class="btn btn-danger btn-sm" data-del="${it.id}">Удалить</button>
+        </div>
+      </div>`);
+    card.querySelector('[data-edit]')?.addEventListener('click', ()=> openDruzhbaModal(it));
+    card.querySelector('[data-del]')?.addEventListener('click', ()=> deleteItem('druzhba', it.id));
+    main.appendChild(card);
+  });
+}
+
+function openDruzhbaModal(it){
+  const editing = !!it;
+  it = it || {id:uid(), cat: activeSub.druzhba, title:"", text:""};
+  const body = `
+    <h3>${editing?"Изменить запись":"Новая запись"}</h3>
+    <div class="field"><label>Категория</label>
+      <div class="chipselect" id="f_cat">
+        ${DRUZHBA_CATS.map(c=>`<div class="opt ${it.cat===c.id?'sel':''}" data-v="${c.id}">${c.label}</div>`).join("")}
+      </div>
+    </div>
+    <div class="field"><label>Заголовок (например, название блюда/вина)</label><input type="text" id="f_title" value="${attr(it.title)}"></div>
+    <div class="field"><label>Описание</label><textarea id="f_text">${escapeHtml(it.text)}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Сохранить</button>
+    </div>`;
+  const overlay = openModal(body);
+  let cat = it.cat;
+  overlay.querySelectorAll('#f_cat .opt').forEach(o=> o.addEventListener('click', ()=>{
+    cat = o.dataset.v;
+    overlay.querySelectorAll('#f_cat .opt').forEach(x=>x.classList.toggle('sel', x===o));
+  }));
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const title = overlay.querySelector('#f_title').value.trim();
+    if(!title){ alert("Укажи заголовок"); return; }
+    it.title = title; it.cat = cat;
+    it.text = overlay.querySelector('#f_text').value.trim();
+    upsert('druzhba', it);
+    await saveData(); closeModal(); render();
+  });
+}
+
+/* ---------- ВО ДВОРЕ ---------- */
+function renderVodvore(main){
+  main.appendChild(el(`<h2 class="section-title">Во дворе — коктейли</h2>`));
+  if(DATA.vodvore.length===0){ main.appendChild(el(`<div class="empty">Пока нет коктейлей.</div>`)); return; }
+  DATA.vodvore.slice().reverse().forEach(c=>{
+    const tastes = (c.tastes||[]).map(t=>`<span class="chip">${t}</span>`).join("");
+    const card = el(`
+      <div class="card">
+        <h3>${escapeHtml(c.name)}</h3>
+        <div class="meta">${tastes}</div>
+        ${c.composition? `<p><b>Состав:</b> ${escapeHtml(c.composition)}</p>`:""}
+        ${c.text? `<p>${escapeHtml(c.text)}</p>`:""}
+        <div class="actions adminOnly">
+          <button class="btn btn-outline btn-sm" data-edit="${c.id}">Изменить</button>
+          <button class="btn btn-danger btn-sm" data-del="${c.id}">Удалить</button>
+        </div>
+      </div>`);
+    card.querySelector('[data-edit]')?.addEventListener('click', ()=> openVodvoreModal(c));
+    card.querySelector('[data-del]')?.addEventListener('click', ()=> deleteItem('vodvore', c.id));
+    main.appendChild(card);
+  });
+}
+
+function openVodvoreModal(c){
+  const editing = !!c;
+  c = c || {id:uid(), name:"", tastes:[], composition:"", text:""};
+  const body = `
+    <h3>${editing?"Изменить коктейль":"Новый коктейль"}</h3>
+    <div class="field"><label>Название</label><input type="text" id="f_name" value="${attr(c.name)}"></div>
+    <div class="field"><label>Вкусовые свойства</label>
+      <div class="chipselect" id="f_tastes">
+        ${TASTE_TAGS.map(t=>`<div class="opt ${c.tastes.includes(t)?'sel':''}" data-v="${t}">${t}</div>`).join("")}
+      </div>
+    </div>
+    <div class="field"><label>Состав</label><textarea id="f_comp">${escapeHtml(c.composition)}</textarea></div>
+    <div class="field"><label>Заметки</label><textarea id="f_text">${escapeHtml(c.text)}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Сохранить</button>
+    </div>`;
+  const overlay = openModal(body);
+  let tastes = new Set(c.tastes);
+  overlay.querySelectorAll('#f_tastes .opt').forEach(o=> o.addEventListener('click', ()=>{
+    const v = o.dataset.v;
+    if(tastes.has(v)){ tastes.delete(v); o.classList.remove('sel'); } else { tastes.add(v); o.classList.add('sel'); }
+  }));
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const name = overlay.querySelector('#f_name').value.trim();
+    if(!name){ alert("Укажи название"); return; }
+    c.name = name; c.tastes = Array.from(tastes);
+    c.composition = overlay.querySelector('#f_comp').value.trim();
+    c.text = overlay.querySelector('#f_text').value.trim();
+    upsert('vodvore', c);
+    await saveData(); closeModal(); render();
+  });
+}
+
+/* ---------- ЗАКУПКИ ---------- */
+function renderProcurement(main){
+  main.appendChild(el(`<h2 class="section-title">Закупки</h2>`));
+  const addGroupBtn = el(`<button class="btn btn-primary btn-sm adminOnly block" style="margin-bottom:12px;">+ Добавить группу поставщика</button>`);
+  addGroupBtn.addEventListener('click', openAddGroupModal);
+  main.appendChild(addGroupBtn);
+
+  if(DATA.procurement.groups.length===0){
+    main.appendChild(el(`<div class="empty">Пока нет групп закупок.</div>`));
+    return;
+  }
+
+  DATA.procurement.groups.forEach(g=>{
+    const gb = el(`<div class="group-block"></div>`);
+    const head = el(`
+      <div class="group-head">
+        <h3>${escapeHtml(g.name)}</h3>
+        <div class="adminOnly" style="display:flex; gap:6px;">
+          <button class="btn btn-outline btn-sm" data-sub="${g.id}">+ Подгруппа</button>
+          <button class="btn btn-danger btn-sm" data-delg="${g.id}">Удалить</button>
+        </div>
+      </div>`);
+    head.querySelector('[data-sub]')?.addEventListener('click', ()=> openAddSubgroupModal(g));
+    head.querySelector('[data-delg]')?.addEventListener('click', ()=>{
+      if(confirm(`Удалить группу «${g.name}» со всем содержимым?`)){
+        DATA.procurement.groups = DATA.procurement.groups.filter(x=>x.id!==g.id);
+        saveData(); render();
+      }
+    });
+    gb.appendChild(head);
+
+    (g.subgroups||[]).forEach(sg=>{
+      const sgTitle = el(`<div class="subgroup-title">${escapeHtml(sg.name)}</div>`);
+      gb.appendChild(sgTitle);
+      const addProdBtn = el(`<button class="btn btn-outline btn-sm adminOnly" style="margin-bottom:8px;">+ Товар в «${escapeHtml(sg.name)}»</button>`);
+      addProdBtn.addEventListener('click', ()=> openAddProductModal(g, sg));
+      gb.appendChild(addProdBtn);
+      if((sg.products||[]).length===0){
+        gb.appendChild(el(`<div class="empty" style="padding:14px;">Нет товаров</div>`));
+      }
+      (sg.products||[]).forEach(p=>{
+        const line = el(`
+          <div class="prod-line">
+            <div class="info"><b>${escapeHtml(p.name)}</b><span>${escapeHtml(p.unit||"")}${p.comment? " · "+escapeHtml(p.comment):""}</span></div>
+            <input type="number" min="0" class="qty" data-pid="${p.id}" placeholder="0">
+            <button class="btn btn-danger btn-sm adminOnly" data-delp="${p.id}">×</button>
+          </div>`);
+        line.querySelector('[data-delp]')?.addEventListener('click', ()=>{
+          sg.products = sg.products.filter(x=>x.id!==p.id);
+          saveData(); render();
+        });
+        gb.appendChild(line);
+      });
+    });
+    main.appendChild(gb);
+  });
+
+  const collectBtn = el(`<button class="btn btn-primary" style="width:100%; margin-top:8px;">Собрать список закупок</button>`);
+  collectBtn.addEventListener('click', collectShoppingList);
+  main.appendChild(collectBtn);
+  main.appendChild(el(`<div id="shopResult" class="hidden"></div>`));
+}
+
+function openAddGroupModal(){
+  const body = `
+    <h3>Новая группа поставщика</h3>
+    <div class="field"><label>Название (например: «Хозка», «Пиво»)</label><input type="text" id="f_name"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Добавить</button>
+    </div>`;
+  const overlay = openModal(body);
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const name = overlay.querySelector('#f_name').value.trim();
+    if(!name) return;
+    DATA.procurement.groups.push({id:uid(), name, subgroups:[]});
+    await saveData(); closeModal(); render();
+  });
+}
+
+function openAddSubgroupModal(g){
+  const body = `
+    <h3>Новая подгруппа в «${escapeHtml(g.name)}»</h3>
+    <div class="field"><label>Название подгруппы</label><input type="text" id="f_name"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Добавить</button>
+    </div>`;
+  const overlay = openModal(body);
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const name = overlay.querySelector('#f_name').value.trim();
+    if(!name) return;
+    g.subgroups = g.subgroups || [];
+    g.subgroups.push({id:uid(), name, products:[]});
+    await saveData(); closeModal(); render();
+  });
+}
+
+function openAddProductModal(g, sg){
+  const body = `
+    <h3>Новый товар в «${escapeHtml(sg.name)}»</h3>
+    <div class="field"><label>Название товара</label><input type="text" id="f_name"></div>
+    <div class="field"><label>Единица измерения (шт, кг, л...)</label><input type="text" id="f_unit"></div>
+    <div class="field"><label>Комментарий</label><input type="text" id="f_comment"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Добавить</button>
+    </div>`;
+  const overlay = openModal(body);
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const name = overlay.querySelector('#f_name').value.trim();
+    if(!name) return;
+    sg.products = sg.products || [];
+    sg.products.push({id:uid(), name, unit:overlay.querySelector('#f_unit').value.trim(), comment:overlay.querySelector('#f_comment').value.trim()});
+    await saveData(); closeModal(); render();
+  });
+}
+
+function collectShoppingList(){
+  let out = "";
+  DATA.procurement.groups.forEach(g=>{
+    let groupLines = [];
+    (g.subgroups||[]).forEach(sg=>{
+      (sg.products||[]).forEach(p=>{
+        const input = document.querySelector(`.qty[data-pid="${p.id}"]`);
+        const qty = input ? parseFloat(input.value) : 0;
+        if(qty && qty>0){
+          groupLines.push(`— ${p.name}: ${qty}${p.unit? " "+p.unit:""}${p.comment? " ("+p.comment+")":""}`);
+        }
+      });
+    });
+    if(groupLines.length){
+      out += `📦 ${g.name}\n` + groupLines.join("\n") + "\n\n";
+    }
+  });
+  const resultBox = document.getElementById('shopResult');
+  if(!out){ resultBox.classList.add('hidden'); alert("Укажи количество хотя бы для одного товара."); return; }
+  resultBox.textContent = out.trim();
+  resultBox.classList.remove('hidden');
+  resultBox.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+/* ==================== ОБЩИЕ ХЕЛПЕРЫ ==================== */
+function upsert(section, item){
+  const arr = DATA[section];
+  const idx = arr.findIndex(x=>x.id===item.id);
+  if(idx>=0) arr[idx]=item; else arr.push(item);
+}
+async function deleteItem(section, id){
+  if(!confirm("Удалить запись?")) return;
+  DATA[section] = DATA[section].filter(x=>x.id!==id);
+  await saveData(); render();
+}
+function openAddModalForTab(){
+  if(activeTab==="techcards") openTechcardModal(null);
+  if(activeTab==="druzhba") openDruzhbaModal(null);
+  if(activeTab==="vodvore") openVodvoreModal(null);
+}
+function openModal(innerHtml){
+  const overlay = el(`<div id="modalOverlay"><div id="modal">${innerHtml}</div></div>`);
+  overlay.addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+function closeModal(){ document.getElementById('modalOverlay')?.remove(); }
+function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function attr(s){ return escapeHtml(s); }
+
+/* ==================== СТАРТ ==================== */
+(async function start(){
+  initTelegram();
+  await loadData();
+  render();
+})();
+</script>
+</body>
+</html>
