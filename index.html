@@ -8,6 +8,8 @@
 <!-- Firebase (используется только если ниже в коде заполнен FIREBASE_CONFIG) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<!-- Сканер штрихкодов (для вкладки Пиво) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
   :root{
     --curtain: #9E3232;
@@ -21,6 +23,16 @@
     --accent: #FFD700;
     --danger: #C24B4B;
     --radius: 14px;
+  }
+  body.theme-light{
+    --bg: #F3EEE1;
+    --bg-soft: #E9E1CC;
+    --card: #FFFFFF;
+    --card-border: #DCD3B8;
+    --text: #2A2A22;
+    --text-dim: #6B6656;
+    --accent: #B8860B;
+    --danger: #B23A3A;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
   html{height:100%;}
@@ -160,6 +172,26 @@
   .tc-group-del{margin-left:4px;}
   #shopResult{white-space:pre-wrap; background:var(--card); border:1px solid var(--card-border); border-radius:10px; padding:12px; font-size:13px; line-height:1.6; margin-top:12px;}
   #shopStickyWrap{position:sticky; bottom:0; background:var(--bg); padding-top:8px; margin-top:4px;}
+
+  /* ===== СВОРАЧИВАЕМОЕ ОПИСАНИЕ В КАРТОЧКАХ ===== */
+  .card-head-row{display:flex; align-items:center; gap:8px; cursor:pointer;}
+  .card-head-row h3{margin:0; flex:1;}
+  .card-head-row .desc-arrow{font-size:12px; color:var(--accent); transition:transform .18s; flex-shrink:0;}
+  .card-head-row .desc-arrow.collapsed{transform:rotate(-90deg);}
+  .card-body{overflow:hidden;}
+  .card-body.collapsed{display:none;}
+
+  /* ===== ПИВО ===== */
+  .beer-price{font-size:17px; font-weight:800; color:var(--accent);}
+  .beer-search{width:100%; background:var(--bg-soft); border:1.5px solid var(--card-border); color:var(--text); border-radius:10px; padding:9px 12px; font-size:14px; margin-bottom:12px;}
+
+  /* ===== СКАНЕР ШТРИХКОДОВ ===== */
+  #scanOverlay{position:fixed; inset:0; background:#000; z-index:120; display:flex; flex-direction:column;}
+  #scanTop{flex:0 0 auto; padding:12px; display:flex; justify-content:space-between; align-items:center; background:var(--curtain);}
+  #scanTop b{color:var(--curtain-text);}
+  #scanClose{background:transparent; border:none; color:var(--curtain-text); font-size:22px; cursor:pointer;}
+  #reader{flex:1;}
+  #scanResult{flex:0 0 auto; padding:16px; background:var(--bg-soft);}
 </style>
 </head>
 <body>
@@ -215,6 +247,7 @@
   </div>
   <div class="curtain-actions">
     <button class="gear" id="searchToggle" title="Поиск">🔍</button>
+    <button class="gear" id="scanToggle" title="Сканировать штрихкод">📷</button>
     <button class="gear hidden" id="editToggle" title="Режим редактирования">✏️</button>
     <button class="gear" id="settingsToggle" title="Настройки">⚙</button>
   </div>
@@ -232,6 +265,8 @@
 <div id="bottomNav">
   <button data-tab="techcards" class="active"><span class="ic">📋</span>Тех.карты</button>
   <button data-tab="partners"><span class="ic">🤝</span>Партнёры</button>
+  <button data-tab="beer"><span class="ic">🍺</span>Пиво</button>
+  <button data-tab="reservations"><span class="ic">📅</span>Брони</button>
   <button data-tab="procurement"><span class="ic">🛒</span>Закупки</button>
 </div>
 
@@ -241,6 +276,15 @@
     <button id="searchClose">×</button>
   </div>
   <div id="searchResults"></div>
+</div>
+
+<div id="scanOverlay" class="hidden">
+  <div id="scanTop">
+    <b>Сканирование штрихкода</b>
+    <button id="scanClose">×</button>
+  </div>
+  <div id="reader"></div>
+  <div id="scanResult"></div>
 </div>
 
 <script>
@@ -270,13 +314,20 @@ const FIREBASE_CONFIG = {
   appId: "1:49840071874:web:52bfedb7bb393b5cbac75b"
 };
 
+// ==== ГУГЛ-ТАБЛИЦА ДЛЯ БРОНЕЙ (необязательно) ====
+// Вставь сюда ссылку на свой Google Apps Script Web App (см. инструкцию в чате).
+// Пока пусто — брони сохраняются только внутри приложения, без синхронизации с таблицей.
+const GOOGLE_SHEETS_WEBAPP_URL = "";
+
 const SECTION_KEYS = {
   techcards: "barry_techcards_v2",
   techcardGroups: "barry_techcardgroups_v1",
   customTabs: "barry_customtabs_v2",
   vodvore: "barry_vodvore_v2",
   procurement: "barry_procurement_v2",
-  settings: "barry_settings_v1"
+  settings: "barry_settings_v1",
+  beer: "barry_beer_v1",
+  reservations: "barry_reservations_v1"
 };
 const LEGACY_KEY = "barry-shared-data"; // ключ старой версии приложения, для миграции
 
@@ -314,7 +365,9 @@ let DATA = {
   customTabs: JSON.parse(JSON.stringify(DEFAULT_CUSTOM_TABS)),
   vodvore: [], // легаси, используется только для одноразовой миграции в Партнёры → Во дворе
   procurement: { groups: [] },
-  settings: { maintenance: false }
+  settings: { maintenance: false },
+  beer: [], // {id, name, tags, description, price, barcode}
+  reservations: [] // {id, date, time, name, phone, count, deposit, table}
 };
 
 let pendingScrollId = null; // id элемента, к которому нужно проскроллить после следующего рендера
@@ -335,6 +388,10 @@ function buildSearchIndex(){
       }));
     });
   });
+  DATA.beer.forEach(b=> idx.push({
+    label: b.name, tags: b.tags||[], category: "Пиво",
+    go: ()=>{ activeTab="beer"; pendingScrollId = `beer-${b.id}`; }
+  }));
   return idx;
 }
 
@@ -444,12 +501,12 @@ async function loadLegacyBlob(){
 }
 
 async function loadAllData(){
-  const [tc, tg_, ct, vd, pr, st] = await Promise.all([
+  const [tc, tg_, ct, vd, pr, st, br, rs] = await Promise.all([
     loadSectionRaw("techcards"), loadSectionRaw("techcardGroups"), loadSectionRaw("customTabs"),
-    loadSectionRaw("vodvore"), loadSectionRaw("procurement"), loadSectionRaw("settings")
+    loadSectionRaw("vodvore"), loadSectionRaw("procurement"), loadSectionRaw("settings"), loadSectionRaw("beer"), loadSectionRaw("reservations")
   ]);
 
-  if(tc===null && tg_===null && ct===null && vd===null && pr===null && st===null){
+  if(tc===null && tg_===null && ct===null && vd===null && pr===null && st===null && br===null && rs===null){
     // новых данных ещё нет — пробуем мигрировать со старой версии приложения
     const legacy = await loadLegacyBlob();
     if(legacy){
@@ -474,7 +531,9 @@ async function loadAllData(){
       }
       DATA.customTabs = tabs;
       DATA.settings = {maintenance:false};
-      await Promise.all(["techcards","techcardGroups","customTabs","procurement","settings"].map(saveSection));
+      DATA.beer = [];
+      DATA.reservations = [];
+      await Promise.all(["techcards","techcardGroups","customTabs","procurement","settings","beer","reservations"].map(saveSection));
       return;
     }
   }
@@ -483,6 +542,8 @@ async function loadAllData(){
   if(tg_) DATA.techcardGroups = tg_;
   if(pr) DATA.procurement = pr;
   if(st) DATA.settings = st; else DATA.settings = {maintenance:false};
+  if(br) DATA.beer = br;
+  if(rs) DATA.reservations = rs;
 
   if(ct){
     DATA.customTabs = flattenCustomTabs(ct);
@@ -586,12 +647,26 @@ async function setMaintenance(on){
   render();
 }
 
+function getTheme(){ return localStorage.getItem("barry_theme") || "dark"; }
+function applyTheme(){
+  document.body.classList.toggle("theme-light", getTheme()==="light");
+}
+function toggleTheme(){
+  localStorage.setItem("barry_theme", getTheme()==="light" ? "dark" : "light");
+  applyTheme();
+}
+
 function openSettingsModal(){
   const status = isAdmin ? (editMode? "режим редактирования включён" : "вы администратор") : "вы гость";
   const maintOn = DATA.settings && DATA.settings.maintenance;
+  const lightOn = getTheme()==="light";
   const body = `
     <h3>Настройки</h3>
     <div class="field"><label>Статус</label><div style="font-size:14px;">${escapeHtml(status)}</div></div>
+    <div class="field">
+      <label>Тема оформления</label>
+      <button class="btn btn-outline btn-block" id="mTheme">${lightOn? "☀️ Сейчас светлая — переключить на тёмную":"🌙 Сейчас тёмная — переключить на светлую"}</button>
+    </div>
     ${isAdmin? `
       <div class="field">
         <label>Технические работы</label>
@@ -608,6 +683,7 @@ function openSettingsModal(){
     </div>`;
   const overlay = openModal(body);
   overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mTheme').addEventListener('click', ()=>{ toggleTheme(); closeModal(); openSettingsModal(); });
   overlay.querySelector('#mMaint')?.addEventListener('click', async ()=>{
     await setMaintenance(!maintOn); closeModal();
   });
@@ -629,6 +705,8 @@ document.getElementById("fabAdd").addEventListener("click", ()=> openAddModalFor
 document.getElementById("searchToggle").addEventListener("click", openSearch);
 document.getElementById("searchClose").addEventListener("click", closeSearch);
 document.getElementById("searchInput").addEventListener("input", (e)=> runSearch(e.target.value));
+document.getElementById("scanToggle").addEventListener("click", ()=> openScanner());
+document.getElementById("scanClose").addEventListener("click", closeScanner);
 
 /* ==================== РЕНДЕР ==================== */
 function el(html){ const d=document.createElement("div"); d.innerHTML=html.trim(); return d.firstChild; }
@@ -646,7 +724,7 @@ function renderMaintenanceScreen(){
 
 function render(){
   document.querySelectorAll("#bottomNav button").forEach(b=> b.classList.toggle("active", b.dataset.tab===activeTab));
-  document.getElementById("fabAdd").classList.toggle("hidden", !isAdmin || !editMode || activeTab==="procurement" || activeTab==="partners");
+  document.getElementById("fabAdd").classList.toggle("hidden", !isAdmin || !editMode || activeTab==="procurement" || activeTab==="partners" || activeTab==="reservations");
 
   if(isMaintenanceActive()){
     document.getElementById("bottomNav").classList.add("hidden");
@@ -657,6 +735,8 @@ function render(){
     main.innerHTML = "";
     if(activeTab==="techcards") renderTechcards(main);
     if(activeTab==="partners") renderPartners(main);
+    if(activeTab==="beer") renderBeer(main);
+    if(activeTab==="reservations") renderReservations(main);
     if(activeTab==="procurement") renderProcurement(main);
   }
 
@@ -670,23 +750,36 @@ function render(){
 }
 
 /* ---------- ТЕХ.КАРТЫ (со сворачиваемыми группами) ---------- */
+let collapsedCardDesc = {}; // {itemId: true(свёрнуто)/false} — общий для всех карточек по всему приложению, по умолчанию свёрнуто
+
 function techcardCardEl(tc){
   const photos = (tc.photos||[]).map(p=>`<img class="thumb" src="${p}">`).join("");
   const tags = (tc.tags||[]).map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("");
+  const descCollapsed = collapsedCardDesc[tc.id] !== false; // по умолчанию свёрнуто
   const card = el(`
     <div class="card">
-      <h3>${escapeHtml(tc.name)}</h3>
-      <p>${escapeHtml(tc.ingredients||"")}</p>
-      ${tc.steps? `<p><b>Приготовление:</b> ${escapeHtml(tc.steps)}</p>`:""}
+      <div class="card-head-row">
+        <h3>${escapeHtml(tc.name)}</h3>
+        <span class="desc-arrow ${descCollapsed?'collapsed':''}">▼</span>
+      </div>
       ${tags? `<div class="meta">${tags}</div>`:""}
-      ${photos}
-      <div class="actions adminOnly">
-        <button class="btn btn-outline btn-sm" data-edit="${tc.id}">Изменить</button>
-        <button class="btn btn-danger btn-sm" data-del="${tc.id}">Удалить</button>
+      <div class="card-body ${descCollapsed?'collapsed':''}">
+        <p>${escapeHtml(tc.ingredients||"")}</p>
+        ${tc.steps? `<p><b>Приготовление:</b> ${escapeHtml(tc.steps)}</p>`:""}
+        ${photos}
+        <div class="actions adminOnly">
+          <button class="btn btn-outline btn-sm" data-edit="${tc.id}">Изменить</button>
+          <button class="btn btn-danger btn-sm" data-del="${tc.id}">Удалить</button>
+        </div>
       </div>
     </div>`);
-  card.querySelector('[data-edit]')?.addEventListener('click', ()=> openTechcardModal(tc));
-  card.querySelector('[data-del]')?.addEventListener('click', ()=> deleteItem('techcards', tc.id));
+  card.querySelector('.card-head-row').addEventListener('click', ()=>{
+    collapsedCardDesc[tc.id] = !descCollapsed;
+    card.querySelector('.desc-arrow').classList.toggle('collapsed');
+    card.querySelector('.card-body').classList.toggle('collapsed');
+  });
+  card.querySelector('[data-edit]')?.addEventListener('click', (e)=>{ e.stopPropagation(); openTechcardModal(tc); });
+  card.querySelector('[data-del]')?.addEventListener('click', (e)=>{ e.stopPropagation(); deleteItem('techcards', tc.id); });
   return card;
 }
 
@@ -711,15 +804,24 @@ function renderTechcards(main){
       <div class="tc-group-head ${isCollapsed?'collapsed':''}">
         <span class="arrow">▼</span>
         <b>${escapeHtml(g.name)} <span style="opacity:.6; font-weight:400;">(${items.length})</span></b>
+        <button class="btn btn-outline btn-sm adminOnly tc-group-del" data-editg="${g.id}">✏️</button>
         <button class="btn btn-danger btn-sm adminOnly tc-group-del" data-delg="${g.id}">Удалить</button>
       </div>`);
     const body = el(`<div class="tc-group-body ${isCollapsed?'collapsed':''}"></div>`);
     items.slice().reverse().forEach(tc=> body.appendChild(techcardCardEl(tc)));
     if(items.length===0) body.appendChild(el(`<div class="empty">Пусто</div>`));
     head.addEventListener('click', (e)=>{
-      if(e.target.closest('[data-delg]')) return;
+      if(e.target.closest('[data-delg]') || e.target.closest('[data-editg]')) return;
       collapsedGroups[g.id] = !collapsedGroups[g.id];
       render();
+    });
+    head.querySelector('[data-editg]')?.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const newName = prompt("Новое название группы:", g.name);
+      if(newName && newName.trim()){
+        g.name = newName.trim();
+        saveSection('techcardGroups').then(render);
+      }
     });
     head.querySelector('[data-delg]')?.addEventListener('click', (e)=>{
       e.stopPropagation();
@@ -842,18 +944,30 @@ function resizeImage(file){
 /* ---------- ПАРТНЁРЫ (вкладка → категория, всё сворачивается стрелочкой, без кликов-переключений) ---------- */
 function partnerNoteCardEl(cat, n){
   const tags = (n.tags||[]).map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("");
+  const descCollapsed = collapsedCardDesc[n.id] !== false;
   const card = el(`
     <div class="card">
-      <h3>${escapeHtml(n.title)}</h3>
-      <p>${escapeHtml(n.text)}</p>
+      <div class="card-head-row">
+        <h3>${escapeHtml(n.title)}</h3>
+        <span class="desc-arrow ${descCollapsed?'collapsed':''}">▼</span>
+      </div>
       ${tags? `<div class="meta">${tags}</div>`:""}
-      <div class="actions adminOnly">
-        <button class="btn btn-outline btn-sm" data-edit="${n.id}">Изменить</button>
-        <button class="btn btn-danger btn-sm" data-del="${n.id}">Удалить</button>
+      <div class="card-body ${descCollapsed?'collapsed':''}">
+        <p>${escapeHtml(n.text)}</p>
+        <div class="actions adminOnly">
+          <button class="btn btn-outline btn-sm" data-edit="${n.id}">Изменить</button>
+          <button class="btn btn-danger btn-sm" data-del="${n.id}">Удалить</button>
+        </div>
       </div>
     </div>`);
-  card.querySelector('[data-edit]')?.addEventListener('click', ()=> openNoteModal(cat, n));
-  card.querySelector('[data-del]')?.addEventListener('click', async ()=>{
+  card.querySelector('.card-head-row').addEventListener('click', ()=>{
+    collapsedCardDesc[n.id] = !descCollapsed;
+    card.querySelector('.desc-arrow').classList.toggle('collapsed');
+    card.querySelector('.card-body').classList.toggle('collapsed');
+  });
+  card.querySelector('[data-edit]')?.addEventListener('click', (e)=>{ e.stopPropagation(); openNoteModal(cat, n); });
+  card.querySelector('[data-del]')?.addEventListener('click', async (e)=>{
+    e.stopPropagation();
     if(!confirm("Удалить запись?")) return;
     cat.notes = cat.notes.filter(x=>x.id!==n.id);
     await saveSection('customTabs'); render();
@@ -1157,6 +1271,239 @@ function collectShoppingList(){
   resultBox.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
+/* ---------- ПИВО ---------- */
+let beerSearchQuery = "";
+
+function renderBeer(main){
+  main.appendChild(el(`<h2 class="section-title">Пиво</h2>`));
+  const addBtn = el(`<button class="btn btn-primary btn-sm adminOnly block" style="margin-bottom:10px;">+ Добавить пиво</button>`);
+  addBtn.addEventListener('click', ()=> openBeerModal(null));
+  main.appendChild(addBtn);
+
+  const searchInput = el(`<input type="text" class="beer-search" placeholder="Поиск по пиву (название или тег)..." value="${attr(beerSearchQuery)}">`);
+  searchInput.addEventListener('input', (e)=>{ beerSearchQuery = e.target.value; renderBeerList(listWrap); });
+  main.appendChild(searchInput);
+
+  const listWrap = el(`<div></div>`);
+  main.appendChild(listWrap);
+  renderBeerList(listWrap);
+}
+
+function renderBeerList(listWrap){
+  listWrap.innerHTML = "";
+  const q = beerSearchQuery.trim().toLowerCase();
+  let items = DATA.beer.slice().reverse();
+  if(q){
+    items = items.filter(b=> b.name.toLowerCase().includes(q) || (b.tags||[]).some(t=>t.toLowerCase().includes(q)));
+  }
+  if(items.length===0){
+    listWrap.appendChild(el(`<div class="empty">${q? "Ничего не нашлось." : "Пока нет позиций пива."+(isAdmin? ' Нажми «+ Добавить пиво».':'')}</div>`));
+    return;
+  }
+  items.forEach(b=>{
+    const tags = (b.tags||[]).map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("");
+    const descCollapsed = collapsedCardDesc[b.id] !== false;
+    const hasDesc = !!b.description;
+    const card = el(`
+      <div class="card" id="beer-${b.id}">
+        <div class="card-head-row">
+          <h3 style="flex:1;">${escapeHtml(b.name)}</h3>
+          <span class="beer-price">${b.price!=null && b.price!==''? b.price+" ₽":""}</span>
+          ${hasDesc? `<span class="desc-arrow ${descCollapsed?'collapsed':''}">▼</span>`:""}
+        </div>
+        ${tags? `<div class="meta">${tags}</div>`:""}
+        <div class="card-body ${hasDesc && descCollapsed?'collapsed':''}">
+          ${hasDesc? `<p>${escapeHtml(b.description)}</p>`:""}
+          <div class="actions adminOnly">
+            <button class="btn btn-outline btn-sm" data-edit="${b.id}">Изменить</button>
+            <button class="btn btn-danger btn-sm" data-del="${b.id}">Удалить</button>
+          </div>
+        </div>
+      </div>`);
+    if(hasDesc){
+      card.querySelector('.card-head-row').addEventListener('click', ()=>{
+        collapsedCardDesc[b.id] = !descCollapsed;
+        card.querySelector('.desc-arrow').classList.toggle('collapsed');
+        card.querySelector('.card-body').classList.toggle('collapsed');
+      });
+    }
+    card.querySelector('[data-edit]')?.addEventListener('click', (e)=>{ e.stopPropagation(); openBeerModal(b); });
+    card.querySelector('[data-del]')?.addEventListener('click', (e)=>{ e.stopPropagation(); deleteItem('beer', b.id); });
+    listWrap.appendChild(card);
+  });
+}
+
+function openBeerModal(b){
+  const editing = !!b;
+  b = b || {id:uid(), name:"", tags:[], description:"", price:"", barcode:""};
+  const body = `
+    <h3>${editing? "Изменить пиво":"Новое пиво"}</h3>
+    <div class="field"><label>Название</label><input type="text" id="f_name" value="${attr(b.name)}"></div>
+    <div class="field"><label>Цена (₽)</label><input type="number" min="0" id="f_price" value="${attr(String(b.price??''))}"></div>
+    <div class="field"><label>Теги (через запятую)</label><input type="text" id="f_tags" value="${attr((b.tags||[]).join(', '))}" placeholder="например: светлое, ipa, разливное"></div>
+    <div class="field"><label>Описание (опционально)</label><textarea id="f_desc">${escapeHtml(b.description)}</textarea></div>
+    <div class="field"><label>Штрихкод (опционально)</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="f_barcode" value="${attr(b.barcode)}" style="flex:1;">
+        <button class="btn btn-outline btn-sm" id="mScanBarcode" type="button">📷</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Сохранить</button>
+    </div>`;
+  const overlay = openModal(body);
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mScanBarcode').addEventListener('click', ()=>{
+    openScanner((code)=>{ overlay.querySelector('#f_barcode').value = code; });
+  });
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const name = overlay.querySelector('#f_name').value.trim();
+    if(!name){ alert("Укажи название"); return; }
+    b.name = name;
+    const priceVal = overlay.querySelector('#f_price').value;
+    b.price = priceVal===''? '' : Number(priceVal);
+    b.tags = parseTags(overlay.querySelector('#f_tags').value);
+    b.description = overlay.querySelector('#f_desc').value.trim();
+    b.barcode = overlay.querySelector('#f_barcode').value.trim();
+    upsert('beer', b);
+    await saveSection('beer'); closeModal(); render();
+  });
+}
+
+/* ---------- СКАНЕР ШТРИХКОДОВ ---------- */
+let scanner = null;
+let scanCallback = null; // если задан — сканер работает "в режиме выбора" (например для поля штрихкода), иначе ищет цену пива сам
+
+function openScanner(callback){
+  scanCallback = callback || null;
+  document.getElementById('scanResult').innerHTML = "";
+  document.getElementById('scanOverlay').classList.remove('hidden');
+  if(!window.Html5Qrcode){
+    document.getElementById('scanResult').innerHTML = `<div class="empty">Не удалось загрузить модуль сканера. Проверь интернет-соединение.</div>`;
+    return;
+  }
+  scanner = new Html5Qrcode("reader");
+  const config = { fps:10, qrbox:{width:250,height:150} };
+  scanner.start({facingMode:"environment"}, config, onScanSuccess).catch(err=>{
+    document.getElementById('scanResult').innerHTML = `<div class="empty">Нет доступа к камере: ${escapeHtml(String(err))}</div>`;
+  });
+}
+
+function onScanSuccess(decodedText){
+  if(scanCallback){
+    scanCallback(decodedText);
+    closeScanner();
+    return;
+  }
+  const found = DATA.beer.find(b=> b.barcode && b.barcode === decodedText);
+  const resultBox = document.getElementById('scanResult');
+  if(found){
+    resultBox.innerHTML = `<div class="card"><h3>${escapeHtml(found.name)}</h3><div class="beer-price">${found.price!=null && found.price!==''? found.price+" ₽":"цена не указана"}</div></div>`;
+  } else {
+    resultBox.innerHTML = `<div class="empty">Штрихкод «${escapeHtml(decodedText)}» не найден в списке пива.</div>`;
+  }
+}
+
+function closeScanner(){
+  document.getElementById('scanOverlay').classList.add('hidden');
+  scanCallback = null;
+  if(scanner){
+    scanner.stop().then(()=>scanner.clear()).catch(()=>{});
+    scanner = null;
+  }
+}
+
+/* ---------- БРОНИ (таблица, опционально синхронизируется с Google Таблицей) ---------- */
+const RESERVATION_COLS = [
+  {key:"date", label:"Дата"},
+  {key:"time", label:"Время"},
+  {key:"name", label:"Имя"},
+  {key:"phone", label:"Телефон"},
+  {key:"count", label:"Кол-во"},
+  {key:"deposit", label:"Депозит"},
+  {key:"table", label:"Стол"}
+];
+
+function renderReservations(main){
+  main.appendChild(el(`<h2 class="section-title">Брони</h2>`));
+  if(!GOOGLE_SHEETS_WEBAPP_URL) main.appendChild(el(`<div class="banner">⚠️ Синхронизация с Google Таблицей не настроена — брони сохраняются только внутри приложения. Спроси в чате, как подключить таблицу.</div>`));
+
+  const addBtn = el(`<button class="btn btn-primary btn-sm adminOnly block" style="margin-bottom:12px;">+ Добавить бронь</button>`);
+  addBtn.addEventListener('click', ()=> openReservationModal(null));
+  main.appendChild(addBtn);
+
+  if(DATA.reservations.length===0){
+    main.appendChild(el(`<div class="empty">Пока нет броней.</div>`));
+    return;
+  }
+
+  const tableWrap = el(`<div style="overflow-x:auto;"></div>`);
+  const table = el(`<table style="width:100%; border-collapse:collapse; font-size:12.5px;"></table>`);
+  const thead = el(`<thead><tr>${RESERVATION_COLS.map(c=>`<th style="text-align:left; padding:7px 8px; border-bottom:1.5px solid var(--card-border); color:var(--accent); white-space:nowrap;">${c.label}</th>`).join("")}<th class="adminOnly" style="padding:7px 8px; border-bottom:1.5px solid var(--card-border);"></th></tr></thead>`);
+  table.appendChild(thead);
+  const tbody = el(`<tbody></tbody>`);
+  DATA.reservations.slice().reverse().forEach(r=>{
+    const tr = el(`<tr>${RESERVATION_COLS.map(c=>`<td style="padding:7px 8px; border-bottom:1px solid var(--card-border); white-space:nowrap;">${escapeHtml(r[c.key]||"")}</td>`).join("")}<td class="adminOnly" style="padding:7px 8px; border-bottom:1px solid var(--card-border); white-space:nowrap;">
+      <button class="btn btn-outline btn-sm" data-edit="${r.id}">✏️</button>
+      <button class="btn btn-danger btn-sm" data-del="${r.id}">✕</button>
+    </td></tr>`);
+    tr.querySelector('[data-edit]')?.addEventListener('click', ()=> openReservationModal(r));
+    tr.querySelector('[data-del]')?.addEventListener('click', ()=> deleteItem('reservations', r.id));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  main.appendChild(tableWrap);
+}
+
+function openReservationModal(r){
+  const editing = !!r;
+  r = r || {id:uid(), date:"", time:"", name:"", phone:"", count:"", deposit:"", table:""};
+  const body = `
+    <h3>${editing? "Изменить бронь":"Новая бронь"}</h3>
+    <div class="field"><label>Дата</label><input type="text" id="f_date" value="${attr(r.date)}" placeholder="напр. 25.08"></div>
+    <div class="field"><label>Время</label><input type="text" id="f_time" value="${attr(r.time)}" placeholder="напр. 19:00"></div>
+    <div class="field"><label>Имя</label><input type="text" id="f_name" value="${attr(r.name)}"></div>
+    <div class="field"><label>Телефон</label><input type="text" id="f_phone" value="${attr(r.phone)}"></div>
+    <div class="field"><label>Кол-во человек</label><input type="number" min="1" id="f_count" value="${attr(String(r.count??''))}"></div>
+    <div class="field"><label>Депозит</label><input type="text" id="f_deposit" value="${attr(r.deposit)}"></div>
+    <div class="field"><label>Стол</label><input type="text" id="f_table" value="${attr(r.table)}"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Сохранить</button>
+    </div>`;
+  const overlay = openModal(body);
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const name = overlay.querySelector('#f_name').value.trim();
+    if(!name){ alert("Укажи имя"); return; }
+    r.date = overlay.querySelector('#f_date').value.trim();
+    r.time = overlay.querySelector('#f_time').value.trim();
+    r.name = name;
+    r.phone = overlay.querySelector('#f_phone').value.trim();
+    r.count = overlay.querySelector('#f_count').value.trim();
+    r.deposit = overlay.querySelector('#f_deposit').value.trim();
+    r.table = overlay.querySelector('#f_table').value.trim();
+    upsert('reservations', r);
+    await saveSection('reservations');
+    syncReservationToSheet(r); // fire-and-forget, не блокирует интерфейс
+    closeModal(); render();
+  });
+}
+
+// Отправляем бронь в Google-таблицу через Apps Script Web App (см. инструкцию в чате).
+// mode:'no-cors' — значит мы не можем прочитать ответ, но запись в таблицу происходит.
+function syncReservationToSheet(r){
+  if(!GOOGLE_SHEETS_WEBAPP_URL) return;
+  fetch(GOOGLE_SHEETS_WEBAPP_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: {"Content-Type":"text/plain;charset=utf-8"},
+    body: JSON.stringify({date:r.date, time:r.time, name:r.name, phone:r.phone, count:r.count, deposit:r.deposit, table:r.table})
+  }).catch(()=>{ /* тихо игнорируем сетевые ошибки синхронизации */ });
+}
+
 /* ==================== ОБЩИЕ ХЕЛПЕРЫ ==================== */
 function upsert(section, item){
   const arr = DATA[section];
@@ -1183,6 +1530,7 @@ function attr(s){ return escapeHtml(s); }
 
 /* ==================== СТАРТ ==================== */
 (async function start(){
+  applyTheme();
   initTelegram();
   initStorage();
   await loadAllData();
