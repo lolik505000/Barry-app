@@ -697,7 +697,15 @@ let collapsedTabs = {};   // {tabId: true/false} для вкладок парт�
 let collapsedCats = {};   // {catId: true/false} для категорий партнёров
 
 document.querySelectorAll("#bottomNav button").forEach(btn=>{
-  btn.addEventListener("click", ()=>{ activeTab = btn.dataset.tab; render(); });
+  btn.addEventListener("click", ()=>{
+    activeTab = btn.dataset.tab;
+    render();
+    // подтягиваем брони из таблицы один раз при переключении на вкладку, а не при каждом рендере —
+    // раньше это было внутри renderReservations() и вызывало бесконечный цикл запросов к таблице
+    if(activeTab==="reservations" && reservationsSheetConfigured()){
+      fetchReservationsFromSheet().then(()=>{ if(activeTab==="reservations") render(); });
+    }
+  });
 });
 document.getElementById("settingsToggle").addEventListener("click", openSettingsModal);
 document.getElementById("editToggle").addEventListener("click", toggleEditMode);
@@ -1375,16 +1383,35 @@ function openBeerModal(b){
 let scanner = null;
 let scanCallback = null; // если задан — сканер работает "в режиме выбора" (например для поля штрихкода), иначе ищет цену пива сам
 
-function openScanner(callback){
+let nativeScanStream = null;
+let nativeScanRAF = null;
+
+async function openScanner(callback){
   scanCallback = callback || null;
   document.getElementById('scanResult').innerHTML = "";
   document.getElementById('scanOverlay').classList.remove('hidden');
+
+  // Путь 1: нативный BarcodeDetector браузера — на современном Android/Chrome
+  // (в том числе внутри Telegram) он заметно надёжнее распознаёт обычные линейные
+  // штрихкоды (EAN/UPC), чем чисто JS-библиотека.
+  if(window.BarcodeDetector){
+    try{
+      await startNativeScanner();
+      return;
+    }catch(err){
+      console.error("Нативный сканер не сработал, пробуем запасной вариант", err);
+      stopNativeScanner();
+    }
+  }
+
+  // Путь 2 (запасной): библиотека html5-qrcode — без ограничивающей рамки
+  // (сканируем весь кадр целиком, так надёжнее, чем в маленькое окошко),
+  // с явным списком форматов и включённым experimental-флагом использовать
+  // нативный детектор внутри себя, если он есть.
   if(!window.Html5Qrcode){
     document.getElementById('scanResult').innerHTML = `<div class="empty">Не удалось загрузить модуль сканера. Проверь интернет-соединение.</div>`;
     return;
   }
-  // Явно перечисляем и штрихкодовые форматы (EAN/UPC/CODE), и QR —
-  // по умолчанию библиотека может не пытаться распознать линейные штрихкоды.
   const formats = window.Html5QrcodeSupportedFormats ? [
     Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
     Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
@@ -1394,18 +1421,51 @@ function openScanner(callback){
   scanner = new Html5Qrcode("reader", formats? {formatsToSupport: formats} : undefined);
   const config = {
     fps: 10,
-    // прямоугольная зона захвата (а не квадрат) — обычные штрихкоды вытянутые по горизонтали,
-    // в квадратное окошко они часто просто не помещаются целиком по ширине
-    qrbox: (viewfinderWidth, viewfinderHeight) => {
-      const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-      const w = Math.floor(Math.min(viewfinderWidth*0.9, minEdge*1.4));
-      const h = Math.floor(w*0.42);
-      return { width: w, height: h };
-    }
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+    // qrbox намеренно не задаём — сканируем весь кадр целиком, это надёжнее
   };
   scanner.start({facingMode:"environment"}, config, onScanSuccess).catch(err=>{
     document.getElementById('scanResult').innerHTML = `<div class="empty">Нет доступа к камере: ${escapeHtml(String(err))}</div>`;
   });
+}
+
+async function startNativeScanner(){
+  const readerDiv = document.getElementById('reader');
+  readerDiv.innerHTML = '<video id="nativeScanVideo" playsinline autoplay muted style="width:100%; height:100%; object-fit:cover;"></video>';
+  const video = document.getElementById('nativeScanVideo');
+  nativeScanStream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: {ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} }
+  });
+  video.srcObject = nativeScanStream;
+  await video.play();
+
+  let detector;
+  try{
+    const supported = (await BarcodeDetector.getSupportedFormats()).filter(f=>
+      ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","itf","qr_code"].includes(f));
+    detector = new BarcodeDetector({ formats: supported.length? supported : undefined });
+  }catch(e){ detector = new BarcodeDetector(); }
+
+  let stopped = false;
+  async function tick(){
+    if(stopped) return;
+    try{
+      const codes = await detector.detect(video);
+      if(codes && codes.length){
+        onScanSuccess(codes[0].rawValue);
+        if(scanCallback){ stopped = true; return; } // в режиме выбора значения (штрихкод для пива) — одного скана достаточно
+      }
+    }catch(e){ /* игнорируем единичные сбои кадра, пробуем дальше */ }
+    nativeScanRAF = requestAnimationFrame(tick);
+  }
+  tick();
+  // сохраняем способ остановки для closeScanner()
+  scanner = { isNative:true, stop: async ()=>{ stopped=true; if(nativeScanRAF) cancelAnimationFrame(nativeScanRAF); }, clear: ()=>{} };
+}
+
+function stopNativeScanner(){
+  if(nativeScanRAF){ cancelAnimationFrame(nativeScanRAF); nativeScanRAF = null; }
+  if(nativeScanStream){ nativeScanStream.getTracks().forEach(t=>t.stop()); nativeScanStream = null; }
 }
 
 function onScanSuccess(decodedText){
@@ -1426,6 +1486,7 @@ function onScanSuccess(decodedText){
 function closeScanner(){
   document.getElementById('scanOverlay').classList.add('hidden');
   scanCallback = null;
+  stopNativeScanner();
   if(scanner){
     scanner.stop().then(()=>scanner.clear()).catch(()=>{});
     scanner = null;
@@ -1529,11 +1590,6 @@ function renderReservations(main){
     table.appendChild(tbody);
     tableWrap.appendChild(table);
     main.appendChild(tableWrap);
-  }
-
-  // фоновое обновление из таблицы (не блокирует то, что уже нарисовано)
-  if(reservationsSheetConfigured()){
-    fetchReservationsFromSheet().then(()=>{ if(activeTab==="reservations") render(); });
   }
 }
 
