@@ -1649,7 +1649,9 @@ function openReservationModal(r){
     closeModal();
     if(reservationsSheetConfigured()){
       await pushReservationToSheet(editing? 'update':'add', r);
+      await new Promise(res=>setTimeout(res, 500)); // небольшая пауза на подстраховку — даём Google Таблице время зафиксировать запись
       await fetchReservationsFromSheet();
+      if(reservationsSyncError) alert("Бронь записалась в таблицу, но не удалось сразу обновить список в приложении: " + reservationsSyncError + "\nПопробуй нажать «🔄 Обновить».");
       render();
     } else {
       upsert('reservations', r);
