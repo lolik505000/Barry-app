@@ -699,6 +699,7 @@ let collapsedCats = {};   // {catId: true/false} для категорий па�
 document.querySelectorAll("#bottomNav button").forEach(btn=>{
   btn.addEventListener("click", ()=>{
     activeTab = btn.dataset.tab;
+    if(activeTab==="reservations" && reservationsSheetConfigured()) reservationsSyncState = "loading";
     render();
     // подтягиваем брони из таблицы один раз при переключении на вкладку, а не при каждом рендере —
     // раньше это было внутри renderReservations() и вызывало бесконечный цикл запросов к таблице
@@ -1506,6 +1507,8 @@ const RESERVATION_COLS = [
 
 function reservationsSheetConfigured(){ return !!GOOGLE_SHEETS_WEBAPP_URL; }
 let reservationsSyncError = null; // текст последней ошибки синхронизации, чтобы показать в интерфейсе, а не только в консоли
+let reservationsLastSyncAt = null; // время последней УСПЕШНОЙ синхронизации — чтобы видеть, что данные реально свежие
+let reservationsSyncState = "idle"; // 'idle' (ещё не пытались) | 'loading' | 'ok' | 'error' — отдельно от error, чтобы не путать "ещё не грузили" с "успешно загрузили"
 
 // Загружаем список броней через JSONP (тег <script>), а не через fetch().
 // Причина: fetch к Apps Script GET часто падает с "Failed to fetch" из-за CORS
@@ -1534,6 +1537,7 @@ function jsonpFetch(url, timeoutMs=10000){
 // работаем с тем, что сохранено локально/в общем хранилище приложения.
 async function fetchReservationsFromSheet(){
   if(!reservationsSheetConfigured()) return;
+  reservationsSyncState = "loading";
   try{
     const rows = await jsonpFetch(GOOGLE_SHEETS_WEBAPP_URL);
     if(!Array.isArray(rows)) throw new Error("Таблица вернула неожиданный формат данных. Обнови код Apps Script до последней версии (нужна поддержка callback/JSONP) и пересоздай развёртывание.");
@@ -1544,9 +1548,12 @@ async function fetchReservationsFromSheet(){
     }));
     await saveSection('reservations'); // локальный кэш на случай, если таблица временно недоступна
     reservationsSyncError = null;
+    reservationsLastSyncAt = new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    reservationsSyncState = "ok";
   }catch(e){
     console.error("Не удалось получить брони из Google Таблицы", e);
     reservationsSyncError = e.message || String(e);
+    reservationsSyncState = "error";
   }
 }
 
@@ -1566,10 +1573,12 @@ function renderReservations(main){
   main.appendChild(el(`<h2 class="section-title">Брони</h2>`));
   if(!reservationsSheetConfigured()){
     main.appendChild(el(`<div class="banner">⚠️ Синхронизация с Google Таблицей не настроена — брони сохраняются только внутри приложения.</div>`));
-  } else if(reservationsSyncError){
+  } else if(reservationsSyncState==="idle" || reservationsSyncState==="loading"){
+    main.appendChild(el(`<div class="banner">⏳ Загружаем брони из таблицы...</div>`));
+  } else if(reservationsSyncState==="error"){
     main.appendChild(el(`<div class="banner" style="border-color:var(--danger); color:var(--danger);">⚠️ Не удалось обновить из таблицы: ${escapeHtml(reservationsSyncError)}</div>`));
   } else {
-    main.appendChild(el(`<div class="banner">✅ Синхронизировано с Google Таблицей — правки в самой таблице тоже подхватятся при следующем открытии.</div>`));
+    main.appendChild(el(`<div class="banner">✅ Синхронизировано с Google Таблицей — загружено броней: ${DATA.reservations.length}${reservationsLastSyncAt? " (обновлено "+reservationsLastSyncAt+")":""}.</div>`));
   }
 
   const btnRow = el(`<div style="display:flex; gap:8px; margin-bottom:12px;"></div>`);
