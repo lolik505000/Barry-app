@@ -1507,23 +1507,36 @@ const RESERVATION_COLS = [
 function reservationsSheetConfigured(){ return !!GOOGLE_SHEETS_WEBAPP_URL; }
 let reservationsSyncError = null; // текст последней ошибки синхронизации, чтобы показать в интерфейсе, а не только в консоли
 
+// Загружаем список броней через JSONP (тег <script>), а не через fetch().
+// Причина: fetch к Apps Script GET часто падает с "Failed to fetch" из-за CORS
+// (у Google ответ на анонимный GET идёт с редиректом, и браузер блокирует чтение).
+// Тег <script> под CORS не подпадает вообще — грузится как обычный js-файл.
+function jsonpFetch(url, timeoutMs=10000){
+  return new Promise((resolve, reject)=>{
+    const cbName = "barryCb_" + Date.now() + "_" + Math.floor(Math.random()*100000);
+    const script = document.createElement('script');
+    let done = false;
+    const timer = setTimeout(()=>{
+      if(done) return; done = true; cleanup();
+      reject(new Error("Таймаут — таблица не ответила за 10 секунд."));
+    }, timeoutMs);
+    function cleanup(){ delete window[cbName]; script.remove(); clearTimeout(timer); }
+    window[cbName] = (data)=>{ if(done) return; done = true; cleanup(); resolve(data); };
+    script.onerror = ()=>{ if(done) return; done = true; cleanup(); reject(new Error("Не удалось загрузить данные из таблицы (ссылка недоступна или неверная).")); };
+    const sep = url.includes('?') ? '&' : '?';
+    script.src = url + sep + "callback=" + cbName + "&t=" + Date.now();
+    document.body.appendChild(script);
+  });
+}
+
 // Подтягиваем актуальные брони прямо из Google Таблицы (значит, правки, внесённые
 // вручную в самой таблице, тоже подхватятся). Если таблица не подключена — просто выходим,
 // работаем с тем, что сохранено локально/в общем хранилище приложения.
 async function fetchReservationsFromSheet(){
   if(!reservationsSheetConfigured()) return;
   try{
-    const res = await fetch(GOOGLE_SHEETS_WEBAPP_URL, {method:"GET"});
-    const text = await res.text();
-    let rows;
-    try{ rows = JSON.parse(text); }
-    catch(parseErr){
-      // Пришёл не JSON — почти всегда это HTML-страница входа в Google
-      // (значит "Who has access" при развёртывании выставлен не на "Все"),
-      // либо ссылка развёртывания устарела после правки кода скрипта.
-      throw new Error("Таблица вернула не список броней, а страницу входа/ошибки. Проверь настройки доступа веб-приложения в Apps Script (должно быть \"Все\") и что ты пересоздал развёртывание после последней правки кода.");
-    }
-    if(!Array.isArray(rows)) throw new Error("Таблица вернула неожиданный формат данных.");
+    const rows = await jsonpFetch(GOOGLE_SHEETS_WEBAPP_URL);
+    if(!Array.isArray(rows)) throw new Error("Таблица вернула неожиданный формат данных. Обнови код Apps Script до последней версии (нужна поддержка callback/JSONP) и пересоздай развёртывание.");
     DATA.reservations = rows.map(row=>({
       id: "row-"+row.row, row: row.row,
       date: row.date||"", time: row.time||"", name: row.name||"",
