@@ -695,6 +695,8 @@ let activeTab = "techcards";
 let collapsedGroups = {}; // {groupId: true/false} для тех.карт
 let collapsedTabs = {};   // {tabId: true/false} для вкладок партнёров
 let collapsedCats = {};   // {catId: true/false} для категорий партнёров
+let reservationsCalMonth = (()=>{ const d=new Date(); d.setDate(1); return d; })(); // текущий показанный месяц календаря броней
+let reservationsSelectedDate = null; // выбранная дата в формате "YYYY-MM-DD" или null
 
 document.querySelectorAll("#bottomNav button").forEach(btn=>{
   btn.addEventListener("click", ()=>{
@@ -1389,16 +1391,21 @@ let nativeScanRAF = null;
 
 async function openScanner(callback){
   scanCallback = callback || null;
-  document.getElementById('scanResult').innerHTML = "";
+  document.getElementById('scanResult').innerHTML = `<div class="empty" style="margin:10px;">Подведи камеру ближе к штрихкоду (~10 см), избегай бликов на упаковке, дай секунду на фокусировку.</div>`;
   document.getElementById('scanOverlay').classList.remove('hidden');
 
-  // Путь 1: нативный BarcodeDetector браузера — на современном Android/Chrome
-  // (в том числе внутри Telegram) он заметно надёжнее распознаёт обычные линейные
-  // штрихкоды (EAN/UPC), чем чисто JS-библиотека.
+  // Путь 1: нативный BarcodeDetector браузера — но только если он реально умеет
+  // распознавать обычные товарные штрихкоды (EAN/UPC), а не только QR. На части
+  // устройств BarcodeDetector есть, но поддерживает исключительно QR-коды —
+  // тогда лучше сразу использовать запасной вариант, а не тратить время впустую.
   if(window.BarcodeDetector){
     try{
-      await startNativeScanner();
-      return;
+      const supported = await BarcodeDetector.getSupportedFormats();
+      if(supported.includes("ean_13") || supported.includes("upc_a") || supported.includes("code_128")){
+        await startNativeScanner(supported);
+        return;
+      }
+      console.warn("Нативный BarcodeDetector не поддерживает товарные штрихкоды на этом устройстве, используем запасной вариант", supported);
     }catch(err){
       console.error("Нативный сканер не сработал, пробуем запасной вариант", err);
       stopNativeScanner();
@@ -1407,8 +1414,9 @@ async function openScanner(callback){
 
   // Путь 2 (запасной): библиотека html5-qrcode — без ограничивающей рамки
   // (сканируем весь кадр целиком, так надёжнее, чем в маленькое окошко),
-  // с явным списком форматов и включённым experimental-флагом использовать
-  // нативный детектор внутри себя, если он есть.
+  // с явным списком форматов, включённым experimental-флагом использовать
+  // нативный детектор внутри себя, и запросом на непрерывную автофокусировку —
+  // без неё телефон часто фокусируется один раз на старте и потом "мажет".
   if(!window.Html5Qrcode){
     document.getElementById('scanResult').innerHTML = `<div class="empty">Не удалось загрузить модуль сканера. Проверь интернет-соединение.</div>`;
     return;
@@ -1425,27 +1433,33 @@ async function openScanner(callback){
     experimentalFeatures: { useBarCodeDetectorIfSupported: true }
     // qrbox намеренно не задаём — сканируем весь кадр целиком, это надёжнее
   };
-  scanner.start({facingMode:"environment"}, config, onScanSuccess).catch(err=>{
-    document.getElementById('scanResult').innerHTML = `<div class="empty">Нет доступа к камере: ${escapeHtml(String(err))}</div>`;
+  const videoConstraints = { facingMode:"environment", width:{ideal:1920}, height:{ideal:1080}, advanced:[{focusMode:"continuous"}] };
+  scanner.start(videoConstraints, config, onScanSuccess).catch(()=>{
+    // на некоторых устройствах advanced-констрейнт focusMode ломает запуск — пробуем без него
+    scanner.start({facingMode:"environment"}, config, onScanSuccess).catch(err=>{
+      document.getElementById('scanResult').innerHTML = `<div class="empty">Нет доступа к камере: ${escapeHtml(String(err))}</div>`;
+    });
   });
 }
 
-async function startNativeScanner(){
+async function startNativeScanner(preSupportedFormats){
   const readerDiv = document.getElementById('reader');
   readerDiv.innerHTML = '<video id="nativeScanVideo" playsinline autoplay muted style="width:100%; height:100%; object-fit:cover;"></video>';
   const video = document.getElementById('nativeScanVideo');
-  nativeScanStream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: {ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} }
-  });
+  const baseConstraints = { facingMode: {ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} };
+  try{
+    // непрерывная автофокусировка — критично для близких мелких штрихкодов на упаковке;
+    // без этого камера часто фокусируется один раз при запуске и дальше "мажет"
+    nativeScanStream = await navigator.mediaDevices.getUserMedia({ video: {...baseConstraints, advanced:[{focusMode:"continuous"}]} });
+  }catch(e){
+    nativeScanStream = await navigator.mediaDevices.getUserMedia({ video: baseConstraints });
+  }
   video.srcObject = nativeScanStream;
   await video.play();
 
-  let detector;
-  try{
-    const supported = (await BarcodeDetector.getSupportedFormats()).filter(f=>
-      ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","itf","qr_code"].includes(f));
-    detector = new BarcodeDetector({ formats: supported.length? supported : undefined });
-  }catch(e){ detector = new BarcodeDetector(); }
+  const wanted = ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","itf","qr_code"];
+  const supported = (preSupportedFormats || []).filter(f=> wanted.includes(f));
+  const detector = new BarcodeDetector({ formats: supported.length? supported : wanted });
 
   let stopped = false;
   async function tick(){
@@ -1543,8 +1557,8 @@ async function fetchReservationsFromSheet(){
     if(!Array.isArray(rows)) throw new Error("Таблица вернула неожиданный формат данных. Обнови код Apps Script до последней версии (нужна поддержка callback/JSONP) и пересоздай развёртывание.");
     DATA.reservations = rows.map(row=>({
       id: "row-"+row.row, row: row.row,
-      date: row.date||"", time: row.time||"", name: row.name||"",
-      phone: row.phone||"", count: row.count||"", deposit: row.deposit||"", table: row.table||""
+      date: String(row.date??""), time: String(row.time??""), name: String(row.name??""),
+      phone: String(row.phone??""), count: String(row.count??""), deposit: String(row.deposit??""), table: String(row.table??"")
     }));
     await saveSection('reservations'); // локальный кэш на случай, если таблица временно недоступна
     reservationsSyncError = null;
@@ -1569,6 +1583,71 @@ async function pushReservationToSheet(action, r){
   }).catch(()=>{ /* тихо игнорируем сетевые ошибки — юзер увидит, что бронь не обновилась, и попробует ещё раз */ });
 }
 
+function reservationLast4(phone){
+  const digits = String(phone==null? "" : phone).replace(/\D/g, "");
+  return digits.length>=4 ? digits.slice(-4) : digits;
+}
+
+function reservationCardEl(r){
+  const descCollapsed = collapsedCardDesc[r.id] !== false; // по умолчанию свёрнуто
+  const shortLine = [
+    r.date || "—",
+    r.name || "без имени",
+    r.table? ("стол "+r.table) : null,
+    reservationLast4(r.phone)? ("···"+reservationLast4(r.phone)) : null,
+    r.count? (r.count+" чел.") : null
+  ].filter(Boolean).join(" · ");
+  const card = el(`
+    <div class="card">
+      <div class="card-head-row">
+        <h3 style="font-size:14.5px;">${escapeHtml(shortLine)}</h3>
+        <span class="desc-arrow ${descCollapsed?'collapsed':''}">▼</span>
+      </div>
+      <div class="card-body ${descCollapsed?'collapsed':''}">
+        <p><b>Дата:</b> ${escapeHtml(r.date||"—")}</p>
+        <p><b>Время:</b> ${escapeHtml(r.time||"—")}</p>
+        <p><b>Имя:</b> ${escapeHtml(r.name||"—")}</p>
+        <p><b>Телефон:</b> ${escapeHtml(r.phone||"—")}</p>
+        <p><b>Кол-во человек:</b> ${escapeHtml(String(r.count||"—"))}</p>
+        <p><b>Депозит:</b> ${escapeHtml(r.deposit||"—")}</p>
+        <p><b>Стол:</b> ${escapeHtml(r.table||"—")}</p>
+        <div class="actions">
+          <button class="btn btn-outline btn-sm" data-edit="${r.id}">Изменить</button>
+          <button class="btn btn-danger btn-sm" data-del="${r.id}">Удалить</button>
+        </div>
+      </div>
+    </div>`);
+  card.querySelector('.card-head-row').addEventListener('click', ()=>{
+    collapsedCardDesc[r.id] = !descCollapsed;
+    card.querySelector('.desc-arrow').classList.toggle('collapsed');
+    card.querySelector('.card-body').classList.toggle('collapsed');
+  });
+  card.querySelector('[data-edit]')?.addEventListener('click', (e)=>{ e.stopPropagation(); openReservationModal(r); });
+  card.querySelector('[data-del]')?.addEventListener('click', (e)=>{ e.stopPropagation(); deleteReservation(r); });
+  return card;
+}
+
+// Разбираем дату брони из свободного текста в ключ "YYYY-MM-DD" для календаря.
+// Понимает ISO (2026-08-25), ДД.ММ.ГГГГ, ДД.ММ.ГГ и ДД.ММ (год берём текущий).
+// Если формат не распознан — возвращаем null, такие брони показываем отдельным списком под календарём.
+function parseReservationDate(str){
+  if(!str) return null;
+  str = String(str).trim();
+  let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return {y:+m[1], mo:+m[2]-1, d:+m[3]};
+  m = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  if(m){ let y=+m[3]; if(y<100) y+=2000; return {y, mo:+m[2]-1, d:+m[1]}; }
+  m = str.match(/^(\d{1,2})\.(\d{1,2})$/);
+  if(m){ return {y:new Date().getFullYear(), mo:+m[2]-1, d:+m[1]}; }
+  return null;
+}
+function reservationDateKey(str){
+  const p = parseReservationDate(str);
+  return p ? `${p.y}-${String(p.mo+1).padStart(2,'0')}-${String(p.d).padStart(2,'0')}` : null;
+}
+function todayKey(){ const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`; }
+function formatDateKeyRu(key){ const [y,m,d]=key.split('-').map(Number); return new Date(y,m-1,d).toLocaleDateString('ru-RU',{day:'numeric', month:'long'}); }
+
 function renderReservations(main){
   main.appendChild(el(`<h2 class="section-title">Брони</h2>`));
   if(!reservationsSheetConfigured()){
@@ -1592,26 +1671,66 @@ function renderReservations(main){
   }
   main.appendChild(btnRow);
 
-  if(DATA.reservations.length===0){
-    main.appendChild(el(`<div class="empty">Пока нет броней.</div>`));
+  // ---- календарь месяца ----
+  const year = reservationsCalMonth.getFullYear(), month = reservationsCalMonth.getMonth();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Пн=0 ... Вс=6
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+
+  const counts = {};
+  DATA.reservations.forEach(r=>{
+    const key = reservationDateKey(r.date);
+    if(key) counts[key] = (counts[key]||0) + 1;
+  });
+
+  const calHeader = el(`
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+      <button class="btn btn-outline btn-sm" id="calPrev">‹</button>
+      <b style="font-size:15px; text-transform:capitalize;">${new Date(year,month,1).toLocaleDateString('ru-RU',{month:'long', year:'numeric'})}</b>
+      <button class="btn btn-outline btn-sm" id="calNext">›</button>
+    </div>`);
+  calHeader.querySelector('#calPrev').addEventListener('click', ()=>{ reservationsCalMonth = new Date(year, month-1, 1); render(); });
+  calHeader.querySelector('#calNext').addEventListener('click', ()=>{ reservationsCalMonth = new Date(year, month+1, 1); render(); });
+  main.appendChild(calHeader);
+
+  const grid = el(`<div style="display:grid; grid-template-columns:repeat(7,1fr); gap:5px; margin-bottom:16px;"></div>`);
+  ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].forEach(d=> grid.appendChild(el(`<div style="text-align:center; font-size:11px; color:var(--text-dim); font-weight:700; padding-bottom:2px;">${d}</div>`)));
+  for(let i=0;i<firstWeekday;i++) grid.appendChild(el(`<div></div>`));
+  const today = todayKey();
+  for(let d=1; d<=daysInMonth; d++){
+    const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const cnt = counts[key]||0;
+    const isSelected = reservationsSelectedDate===key;
+    const isToday = key===today;
+    const cell = el(`
+      <div style="text-align:center; padding:7px 2px; border-radius:9px; cursor:pointer;
+        background:${isSelected? 'var(--accent)':'var(--card)'};
+        border:1.5px solid ${isToday? 'var(--accent)':'var(--card-border)'};
+        color:${isSelected? '#2b2200':'var(--text)'}; font-size:12.5px; font-weight:${cnt?800:400};">
+        ${d}${cnt? `<div style="font-size:8px; margin-top:2px; color:${isSelected? '#2b2200':'var(--accent)'};">●${cnt>1?cnt:''}</div>` : ''}
+      </div>`);
+    cell.addEventListener('click', ()=>{ reservationsSelectedDate = isSelected? null : key; render(); });
+    grid.appendChild(cell);
+  }
+  main.appendChild(grid);
+
+  // ---- брони на выбранный день ----
+  if(reservationsSelectedDate){
+    const dayRes = DATA.reservations.filter(r=> reservationDateKey(r.date)===reservationsSelectedDate);
+    main.appendChild(el(`<div class="subhead">Брони на ${formatDateKeyRu(reservationsSelectedDate)}</div>`));
+    if(!dayRes.length){
+      main.appendChild(el(`<div class="empty">Нет броней на этот день.</div>`));
+    } else {
+      dayRes.forEach(r=> main.appendChild(reservationCardEl(r)));
+    }
   } else {
-    const tableWrap = el(`<div style="overflow-x:auto;"></div>`);
-    const table = el(`<table style="width:100%; border-collapse:collapse; font-size:12.5px;"></table>`);
-    const thead = el(`<thead><tr>${RESERVATION_COLS.map(c=>`<th style="text-align:left; padding:7px 8px; border-bottom:1.5px solid var(--card-border); color:var(--accent); white-space:nowrap;">${c.label}</th>`).join("")}<th style="padding:7px 8px; border-bottom:1.5px solid var(--card-border);"></th></tr></thead>`);
-    table.appendChild(thead);
-    const tbody = el(`<tbody></tbody>`);
-    DATA.reservations.slice().reverse().forEach(r=>{
-      const tr = el(`<tr>${RESERVATION_COLS.map(c=>`<td style="padding:7px 8px; border-bottom:1px solid var(--card-border); white-space:nowrap;">${escapeHtml(String(r[c.key]||""))}</td>`).join("")}<td style="padding:7px 8px; border-bottom:1px solid var(--card-border); white-space:nowrap;">
-        <button class="btn btn-outline btn-sm" data-edit="${r.id}">✏️</button>
-        <button class="btn btn-danger btn-sm" data-del="${r.id}">✕</button>
-      </td></tr>`);
-      tr.querySelector('[data-edit]')?.addEventListener('click', ()=> openReservationModal(r));
-      tr.querySelector('[data-del]')?.addEventListener('click', ()=> deleteReservation(r));
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    tableWrap.appendChild(table);
-    main.appendChild(tableWrap);
+    main.appendChild(el(`<div class="empty">Выбери дату в календаре, чтобы увидеть брони на этот день.</div>`));
+  }
+
+  // ---- брони, у которых дату не удалось разобрать (нестандартный формат текста) ----
+  const unparsed = DATA.reservations.filter(r=> !reservationDateKey(r.date));
+  if(unparsed.length){
+    main.appendChild(el(`<div class="subhead">Без распознанной даты</div>`));
+    unparsed.forEach(r=> main.appendChild(reservationCardEl(r)));
   }
 }
 
@@ -1629,10 +1748,16 @@ async function deleteReservation(r){
 
 function openReservationModal(r){
   const editing = !!r;
-  r = r || {id:uid(), row:null, date:"", time:"", name:"", phone:"", count:"", deposit:"", table:""};
+  r = r || {id:uid(), row:null, date: reservationsSelectedDate || "", time:"", name:"", phone:"", count:"", deposit:"", table:""};
+  // если у брони уже есть дата в старом текстовом формате — пытаемся превратить её в YYYY-MM-DD для <input type="date">
+  const isoDate = (()=>{
+    if(/^\d{4}-\d{2}-\d{2}$/.test(r.date)) return r.date;
+    const key = reservationDateKey(r.date);
+    return key || "";
+  })();
   const body = `
     <h3>${editing? "Изменить бронь":"Новая бронь"}</h3>
-    <div class="field"><label>Дата</label><input type="text" id="f_date" value="${attr(r.date)}" placeholder="напр. 25.08"></div>
+    <div class="field"><label>Дата</label><input type="date" id="f_date" value="${attr(isoDate)}"></div>
     <div class="field"><label>Время</label><input type="text" id="f_time" value="${attr(r.time)}" placeholder="напр. 19:00"></div>
     <div class="field"><label>Имя</label><input type="text" id="f_name" value="${attr(r.name)}"></div>
     <div class="field"><label>Телефон</label><input type="text" id="f_phone" value="${attr(r.phone)}"></div>
@@ -1690,7 +1815,7 @@ function openModal(innerHtml){
   return overlay;
 }
 function closeModal(){ document.getElementById('modalOverlay')?.remove(); }
-function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function escapeHtml(s){ return String(s==null? "" : s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function attr(s){ return escapeHtml(s); }
 
 /* ==================== СТАРТ ==================== */
