@@ -1588,10 +1588,17 @@ function reservationLast4(phone){
   return digits.length>=4 ? digits.slice(-4) : digits;
 }
 
+function displayReservationDate(str){
+  if(!str) return "—";
+  const key = reservationDateKey(str);
+  return key ? formatDateKeyRu(key) : String(str);
+}
+
 function reservationCardEl(r){
   const descCollapsed = collapsedCardDesc[r.id] !== false; // по умолчанию свёрнуто
+  const dateLabel = displayReservationDate(r.date);
   const shortLine = [
-    r.date || "—",
+    dateLabel !== "—" ? dateLabel : null,
     r.name || "без имени",
     r.table? ("стол "+r.table) : null,
     reservationLast4(r.phone)? ("···"+reservationLast4(r.phone)) : null,
@@ -1604,7 +1611,7 @@ function reservationCardEl(r){
         <span class="desc-arrow ${descCollapsed?'collapsed':''}">▼</span>
       </div>
       <div class="card-body ${descCollapsed?'collapsed':''}">
-        <p><b>Дата:</b> ${escapeHtml(r.date||"—")}</p>
+        <p><b>Дата:</b> ${escapeHtml(dateLabel)}</p>
         <p><b>Время:</b> ${escapeHtml(r.time||"—")}</p>
         <p><b>Имя:</b> ${escapeHtml(r.name||"—")}</p>
         <p><b>Телефон:</b> ${escapeHtml(r.phone||"—")}</p>
@@ -1633,9 +1640,11 @@ function reservationCardEl(r){
 function parseReservationDate(str){
   if(!str) return null;
   str = String(str).trim();
-  let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  // ISO с хвостом времени (напр. 2026-08-27T20:00:00.000Z) — берём только дату,
+  // это бывает, если Google Таблица сама распознала текст как дату и переформатировала ячейку
+  let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if(m) return {y:+m[1], mo:+m[2]-1, d:+m[3]};
-  m = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  m = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
   if(m){ let y=+m[3]; if(y<100) y+=2000; return {y, mo:+m[2]-1, d:+m[1]}; }
   m = str.match(/^(\d{1,2})\.(\d{1,2})$/);
   if(m){ return {y:new Date().getFullYear(), mo:+m[2]-1, d:+m[1]}; }
