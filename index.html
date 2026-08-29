@@ -117,7 +117,8 @@
   button.btn-block{width:100%; margin:10px 0;}
   .fab{position:fixed; right:16px; bottom:80px; z-index:40; width:52px; height:52px; border-radius:50%; background:var(--accent); color:#2b2200; font-size:26px; border:none; box-shadow:0 6px 16px rgba(0,0,0,.4); cursor:pointer;}
 
-  #bottomNav{flex:0 0 auto; background:var(--bg-soft); border-top:1px solid var(--card-border); display:flex; z-index:45;}
+  #bottomNav{flex:0 0 auto; background:var(--bg-soft); border-top:1px solid var(--card-border); display:flex; z-index:45; overflow-x:auto;}
+  #bottomNav button{min-width:58px;}
   #bottomNav button{flex:1; background:none; border:none; color:var(--text-dim); padding:9px 2px 8px; font-size:10.5px; display:flex; flex-direction:column; align-items:center; gap:3px; cursor:pointer;}
   #bottomNav button span.ic{font-size:19px;}
   #bottomNav button.active{color:var(--accent);}
@@ -157,6 +158,7 @@
   .prod-line .info b{font-size:13.5px; display:block;}
   .prod-line .info span{font-size:11.5px; color:var(--text-dim);}
   .prod-line input.qty{width:58px; text-align:center; background:var(--bg); border:1.5px solid var(--card-border); color:var(--text); border-radius:8px; padding:6px 4px; font-size:13px; flex-shrink:0;}
+  .prod-line.picked{border-color:var(--accent); background:rgba(255,215,0,.08);}
   .group-block{margin-bottom:16px;}
   .group-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px;}
   .group-head h3{margin:0; font-size:15px; color:var(--accent);}
@@ -172,6 +174,13 @@
   .tc-group-del{margin-left:4px;}
   #shopResult{white-space:pre-wrap; background:var(--card); border:1px solid var(--card-border); border-radius:10px; padding:12px; font-size:13px; line-height:1.6; margin-top:12px;}
   #shopStickyWrap{position:sticky; bottom:0; background:var(--bg); padding-top:8px; margin-top:4px;}
+
+  /* ===== ЧЕК-ЛИСТЫ ===== */
+  .checklist-line{display:flex; align-items:center; gap:10px; background:var(--card); border:1px solid var(--card-border); border-radius:10px; padding:9px 11px; margin-bottom:7px; cursor:pointer;}
+  .checklist-box{width:22px; height:22px; border-radius:6px; border:1.5px solid var(--card-border); display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--accent); flex-shrink:0;}
+  .checklist-line.checked .checklist-box{background:var(--accent); color:#2b2200; border-color:var(--accent);}
+  .checklist-text{flex:1; font-size:13.5px;}
+  .checklist-line.checked .checklist-text{text-decoration:line-through; opacity:.6;}
 
   /* ===== СВОРАЧИВАЕМОЕ ОПИСАНИЕ В КАРТОЧКАХ ===== */
   .card-head-row{display:flex; align-items:center; gap:8px; cursor:pointer;}
@@ -268,6 +277,7 @@
   <button data-tab="beer"><span class="ic">🍺</span>Пиво</button>
   <button data-tab="reservations"><span class="ic">📅</span>Брони</button>
   <button data-tab="procurement"><span class="ic">🛒</span>Закупки</button>
+  <button data-tab="checklists"><span class="ic">✅</span>Чек-листы</button>
 </div>
 
 <div id="searchOverlay" class="hidden">
@@ -327,7 +337,8 @@ const SECTION_KEYS = {
   procurement: "barry_procurement_v2",
   settings: "barry_settings_v1",
   beer: "barry_beer_v1",
-  reservations: "barry_reservations_v1"
+  reservations: "barry_reservations_v1",
+  checklists: "barry_checklists_v1"
 };
 const LEGACY_KEY = "barry-shared-data"; // ключ старой версии приложения, для миграции
 
@@ -364,10 +375,11 @@ let DATA = {
   techcardGroups: [], // {id, name}
   customTabs: JSON.parse(JSON.stringify(DEFAULT_CUSTOM_TABS)),
   vodvore: [], // легаси, используется только для одноразовой миграции в Партнёры → Во дворе
-  procurement: { groups: [] },
+  procurement: { groups: [] }, // {id,name,icon, subgroups:[{id,name(может быть null),products:[{id,name,note,qty}]}]}
   settings: { maintenance: false },
   beer: [], // {id, name, tags, description, price, barcode}
-  reservations: [] // {id, date, time, name, phone, count, deposit, table}
+  reservations: [], // {id, date, time, name, phone, count, deposit, table}
+  checklists: [] // {id, name, items:[{id, text}]}
 };
 
 let pendingScrollId = null; // id элемента, к которому нужно проскроллить после следующего рендера
@@ -501,17 +513,18 @@ async function loadLegacyBlob(){
 }
 
 async function loadAllData(){
-  const [tc, tg_, ct, vd, pr, st, br, rs] = await Promise.all([
+  const [tc, tg_, ct, vd, pr, st, br, rs, cl] = await Promise.all([
     loadSectionRaw("techcards"), loadSectionRaw("techcardGroups"), loadSectionRaw("customTabs"),
-    loadSectionRaw("vodvore"), loadSectionRaw("procurement"), loadSectionRaw("settings"), loadSectionRaw("beer"), loadSectionRaw("reservations")
+    loadSectionRaw("vodvore"), loadSectionRaw("procurement"), loadSectionRaw("settings"), loadSectionRaw("beer"),
+    loadSectionRaw("reservations"), loadSectionRaw("checklists")
   ]);
 
-  if(tc===null && tg_===null && ct===null && vd===null && pr===null && st===null && br===null && rs===null){
+  if(tc===null && tg_===null && ct===null && vd===null && pr===null && st===null && br===null && rs===null && cl===null){
     // новых данных ещё нет — пробуем мигрировать со старой версии приложения
     const legacy = await loadLegacyBlob();
     if(legacy){
       DATA.techcards = legacy.techcards || [];
-      DATA.procurement = legacy.procurement || {groups:[]};
+      DATA.procurement = {groups: normalizeProcurement(legacy.procurement).groups};
       const tabs = JSON.parse(JSON.stringify(DEFAULT_CUSTOM_TABS));
       if(Array.isArray(legacy.druzhba) && legacy.druzhba.length){
         legacy.druzhba.forEach(item=>{
@@ -533,17 +546,24 @@ async function loadAllData(){
       DATA.settings = {maintenance:false};
       DATA.beer = [];
       DATA.reservations = [];
-      await Promise.all(["techcards","techcardGroups","customTabs","procurement","settings","beer","reservations"].map(saveSection));
+      DATA.checklists = [];
+      await Promise.all(["techcards","techcardGroups","customTabs","procurement","settings","beer","reservations","checklists"].map(saveSection));
       return;
     }
   }
 
   if(tc) DATA.techcards = tc;
   if(tg_) DATA.techcardGroups = tg_;
-  if(pr) DATA.procurement = pr;
   if(st) DATA.settings = st; else DATA.settings = {maintenance:false};
   if(br) DATA.beer = br;
   if(rs) DATA.reservations = rs;
+  if(cl) DATA.checklists = cl;
+
+  if(pr){
+    const norm = normalizeProcurement(pr);
+    DATA.procurement = {groups: norm.groups};
+    if(norm.changed) await saveSection("procurement"); // сохраняем один раз, если формат был старым (unit/comment вместо note/qty)
+  }
 
   if(ct){
     DATA.customTabs = flattenCustomTabs(ct);
@@ -569,6 +589,26 @@ async function loadAllData(){
       await saveSection("customTabs"); // сохраняем на случай если flatten что-то изменил
     }
   }
+}
+
+// Приводим закупки к новому формату товара {id,name,note,qty} — но только если товар
+// реально в старом формате (нет поля qty). Если формат уже новый — ничего не трогаем,
+// чтобы не обнулять текущие введённые количества при каждой загрузке.
+function normalizeProcurement(pr){
+  if(!pr || !Array.isArray(pr.groups)) return {groups:[], changed:false};
+  let changed = false;
+  const groups = pr.groups.map(g=>({
+    id: g.id, name: g.name, icon: g.icon || "",
+    subgroups: (g.subgroups||[]).map(sg=>({
+      id: sg.id, name: sg.name || null,
+      products: (sg.products||[]).map(p=>{
+        if(p.qty !== undefined) return p; // уже новый формат
+        changed = true;
+        return { id:p.id, name:p.name, qty:0, note:[p.comment,p.unit].filter(Boolean).join(" · ") };
+      })
+    }))
+  }));
+  return {groups, changed};
 }
 
 function subscribeRealtime(){
@@ -735,7 +775,7 @@ function renderMaintenanceScreen(){
 
 function render(){
   document.querySelectorAll("#bottomNav button").forEach(b=> b.classList.toggle("active", b.dataset.tab===activeTab));
-  document.getElementById("fabAdd").classList.toggle("hidden", !isAdmin || !editMode || activeTab==="procurement" || activeTab==="partners" || activeTab==="reservations");
+  document.getElementById("fabAdd").classList.toggle("hidden", !isAdmin || !editMode || activeTab==="procurement" || activeTab==="partners" || activeTab==="reservations" || activeTab==="checklists");
 
   if(isMaintenanceActive()){
     document.getElementById("bottomNav").classList.add("hidden");
@@ -749,6 +789,7 @@ function render(){
     if(activeTab==="beer") renderBeer(main);
     if(activeTab==="reservations") renderReservations(main);
     if(activeTab==="procurement") renderProcurement(main);
+    if(activeTab==="checklists") renderChecklists(main);
   }
 
   if(pendingScrollId){
@@ -1134,152 +1175,218 @@ function openNoteModal(cat, note){
 }
 
 /* ---------- ЗАКУПКИ ---------- */
+let activeProcurementGroupId = null;
+
+function procGroupPickedCount(g){
+  let n=0;
+  (g.subgroups||[]).forEach(sg=>(sg.products||[]).forEach(p=>{ if(p.qty>0) n++; }));
+  return n;
+}
+function procTotalPickedAll(){
+  let n=0; DATA.procurement.groups.forEach(g=> n+=procGroupPickedCount(g));
+  return n;
+}
+function findProcProduct(gid, sid, pid){
+  const g = DATA.procurement.groups.find(x=>x.id===gid); if(!g) return null;
+  const sg = (g.subgroups||[]).find(x=>x.id===sid); if(!sg) return null;
+  return (sg.products||[]).find(x=>x.id===pid) || null;
+}
+
 function renderProcurement(main){
   main.appendChild(el(`<h2 class="section-title">Закупки</h2>`));
-  const addGroupBtn = el(`<button class="btn btn-primary btn-sm adminOnly block" style="margin-bottom:12px;">+ Добавить группу поставщика</button>`);
-  addGroupBtn.addEventListener('click', openAddGroupModal);
-  main.appendChild(addGroupBtn);
+
+  // строка вкладок-поставщиков с бейджем количества отмеченных товаров
+  const tabRow = el(`<div class="pillrow"></div>`);
+  DATA.procurement.groups.forEach(g=>{
+    if(!activeProcurementGroupId) activeProcurementGroupId = g.id;
+    const cnt = procGroupPickedCount(g);
+    const p = el(`<div class="pill ${g.id===activeProcurementGroupId?'active':''}">${g.icon? g.icon+" ":""}${escapeHtml(g.name)}${cnt>0? ` <b style="color:var(--danger);">${cnt}</b>`:""}</div>`);
+    p.addEventListener('click', ()=>{ activeProcurementGroupId=g.id; render(); });
+    tabRow.appendChild(p);
+  });
+  const addGroupPill = el(`<div class="pill addpill adminOnly">+ поставщик</div>`);
+  addGroupPill.addEventListener('click', openAddGroupModal);
+  tabRow.appendChild(addGroupPill);
+  main.appendChild(tabRow);
 
   if(DATA.procurement.groups.length===0){
-    main.appendChild(el(`<div class="empty">Пока нет групп закупок.</div>`));
+    main.appendChild(el(`<div class="empty">Пока нет ни одной группы поставщика.${isAdmin?' Нажми «+ поставщик».':''}</div>`));
     return;
   }
 
-  DATA.procurement.groups.forEach(g=>{
-    const gb = el(`<div class="group-block"></div>`);
-    const head = el(`
-      <div class="group-head">
-        <h3>${escapeHtml(g.name)}</h3>
-        <div class="adminOnly" style="display:flex; gap:6px;">
-          <button class="btn btn-outline btn-sm" data-sub="${g.id}">+ Подгруппа</button>
-          <button class="btn btn-danger btn-sm" data-delg="${g.id}">Удалить</button>
-        </div>
+  const g = DATA.procurement.groups.find(x=>x.id===activeProcurementGroupId) || DATA.procurement.groups[0];
+  activeProcurementGroupId = g.id;
+
+  const delGroupBtn = el(`<button class="btn btn-danger btn-sm adminOnly" style="margin-bottom:10px;">Удалить поставщика «${escapeHtml(g.name)}»</button>`);
+  delGroupBtn.addEventListener('click', ()=>{
+    if(confirm(`Удалить поставщика «${g.name}» со всем содержимым?`)){
+      DATA.procurement.groups = DATA.procurement.groups.filter(x=>x.id!==g.id);
+      activeProcurementGroupId = null;
+      saveSection('procurement').then(render);
+    }
+  });
+  main.appendChild(delGroupBtn);
+
+  (g.subgroups||[]).forEach(sg=>{
+    if(sg.name){
+      const sgHead = el(`<div class="subgroup-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>${escapeHtml(sg.name)}</span>
+        <span class="adminOnly" style="text-transform:none; font-weight:600; color:var(--danger); cursor:pointer;" data-delsub="${sg.id}">удалить подгруппу</span>
       </div>`);
-    head.querySelector('[data-sub]')?.addEventListener('click', ()=> openAddSubgroupModal(g));
-    head.querySelector('[data-delg]')?.addEventListener('click', ()=>{
-      if(confirm(`Удалить группу «${g.name}» со всем содержимым?`)){
-        DATA.procurement.groups = DATA.procurement.groups.filter(x=>x.id!==g.id);
-        saveSection('procurement'); render();
-      }
-    });
-    gb.appendChild(head);
-
-    (g.subgroups||[]).forEach(sg=>{
-      const sgTitle = el(`<div class="subgroup-title">${escapeHtml(sg.name)}</div>`);
-      gb.appendChild(sgTitle);
-      const addProdBtn = el(`<button class="btn btn-outline btn-sm adminOnly" style="margin-bottom:8px;">+ Товар в «${escapeHtml(sg.name)}»</button>`);
-      addProdBtn.addEventListener('click', ()=> openAddProductModal(g, sg));
-      gb.appendChild(addProdBtn);
-      if((sg.products||[]).length===0){
-        gb.appendChild(el(`<div class="empty" style="padding:14px;">Нет товаров</div>`));
-      }
-      (sg.products||[]).forEach(p=>{
-        const tagsStr = (p.tags||[]).length? " · #"+p.tags.join(" #") : "";
-        const line = el(`
-          <div class="prod-line">
-            <div class="info"><b>${escapeHtml(p.name)}</b><span>${escapeHtml(p.unit||"")}${p.comment? " · "+escapeHtml(p.comment):""}${tagsStr}</span></div>
-            <input type="number" min="0" class="qty" data-pid="${p.id}" placeholder="0">
-            <button class="btn btn-danger btn-sm adminOnly" data-delp="${p.id}">×</button>
-          </div>`);
-        line.querySelector('[data-delp]')?.addEventListener('click', ()=>{
-          sg.products = sg.products.filter(x=>x.id!==p.id);
-          saveSection('procurement'); render();
-        });
-        gb.appendChild(line);
+      sgHead.querySelector('[data-delsub]')?.addEventListener('click', ()=>{
+        if(confirm(`Удалить подгруппу «${sg.name}» со всеми товарами?`)){
+          g.subgroups = g.subgroups.filter(x=>x.id!==sg.id);
+          saveSection('procurement').then(render);
+        }
       });
+      main.appendChild(sgHead);
+    }
+    if(!(sg.products||[]).length){
+      main.appendChild(el(`<div class="empty" style="padding:12px;">Нет товаров</div>`));
+    }
+    (sg.products||[]).forEach(p=> main.appendChild(procProductRowEl(g, sg, p)));
+
+    const addRow = el(`<div class="field adminOnly" style="display:flex; gap:6px; margin-bottom:14px;">
+      <input type="text" placeholder="Название товара" id="new-name-${sg.id}" style="flex:1;">
+      <input type="text" placeholder="Заметка" id="new-note-${sg.id}" style="flex:1;">
+    </div>`);
+    main.appendChild(addRow);
+    const addBtn = el(`<button class="btn btn-outline btn-sm adminOnly" style="margin-bottom:16px;">+ добавить товар</button>`);
+    addBtn.addEventListener('click', async ()=>{
+      const nameInput = document.getElementById(`new-name-${sg.id}`);
+      const noteInput = document.getElementById(`new-note-${sg.id}`);
+      const name = nameInput.value.trim();
+      if(!name) return;
+      sg.products = sg.products || [];
+      sg.products.push({id:uid(), name, note:noteInput.value.trim(), qty:0});
+      await saveSection('procurement'); render();
     });
-    main.appendChild(gb);
+    main.appendChild(addBtn);
   });
 
-  const stickyWrap = el(`<div id="shopStickyWrap"></div>`);
-  const collectBtn = el(`<button class="btn btn-primary btn-block">Собрать список закупок</button>`);
-  collectBtn.addEventListener('click', collectShoppingList);
-  stickyWrap.appendChild(collectBtn);
-  stickyWrap.appendChild(el(`<div id="shopResult" class="hidden"></div>`));
-  main.appendChild(stickyWrap);
-}
-
-function openAddGroupModal(){
-  const body = `
-    <h3>Новая группа поставщика</h3>
-    <div class="field"><label>Название (например: «Хозка», «Пиво»)</label><input type="text" id="f_name"></div>
-    <div class="modal-actions">
-      <button class="btn btn-outline" id="mCancel">Отмена</button>
-      <button class="btn btn-primary" id="mSave">Добавить</button>
-    </div>`;
-  const overlay = openModal(body);
-  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
-  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
-    const name = overlay.querySelector('#f_name').value.trim();
-    if(!name) return;
-    DATA.procurement.groups.push({id:uid(), name, subgroups:[]});
-    await saveSection('procurement'); closeModal(); render();
-  });
-}
-
-function openAddSubgroupModal(g){
-  const body = `
-    <h3>Новая подгруппа в «${escapeHtml(g.name)}»</h3>
-    <div class="field"><label>Название подгруппы</label><input type="text" id="f_name"></div>
-    <div class="modal-actions">
-      <button class="btn btn-outline" id="mCancel">Отмена</button>
-      <button class="btn btn-primary" id="mSave">Добавить</button>
-    </div>`;
-  const overlay = openModal(body);
-  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
-  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
-    const name = overlay.querySelector('#f_name').value.trim();
+  const addSubRow = el(`<div class="field adminOnly" style="display:flex; gap:6px; margin-bottom:8px;">
+    <input type="text" placeholder="Название новой подгруппы" id="new-sub-name" style="flex:1;">
+  </div>`);
+  main.appendChild(addSubRow);
+  const addSubBtn = el(`<button class="btn btn-outline btn-sm adminOnly block" style="margin-bottom:14px;">+ подгруппа</button>`);
+  addSubBtn.addEventListener('click', async ()=>{
+    const input = document.getElementById('new-sub-name');
+    const name = input.value.trim();
     if(!name) return;
     g.subgroups = g.subgroups || [];
     g.subgroups.push({id:uid(), name, products:[]});
-    await saveSection('procurement'); closeModal(); render();
+    await saveSection('procurement'); render();
   });
+  main.appendChild(addSubBtn);
+
+  const collectBtn = el(`<button class="btn btn-primary btn-block">🧾 Собрать заказ${procTotalPickedAll()>0? ` (${procTotalPickedAll()})`:""}</button>`);
+  collectBtn.addEventListener('click', openProcurementOrderSheet);
+  main.appendChild(collectBtn);
 }
 
-function openAddProductModal(g, sg){
-  const body = `
-    <h3>Новый товар в «${escapeHtml(sg.name)}»</h3>
-    <div class="field"><label>Название товара</label><input type="text" id="f_name"></div>
-    <div class="field"><label>Единица измерения (шт, кг, л...)</label><input type="text" id="f_unit"></div>
-    <div class="field"><label>Комментарий</label><input type="text" id="f_comment"></div>
-    <div class="field"><label>Теги (через запятую)</label><input type="text" id="f_tags" placeholder="например: хозка, срочно"></div>
-    <div class="modal-actions">
-      <button class="btn btn-outline" id="mCancel">Отмена</button>
-      <button class="btn btn-primary" id="mSave">Добавить</button>
-    </div>`;
+function procProductRowEl(g, sg, p){
+  const noteHtml = p.note? `<span style="color:var(--text-dim); font-size:11.5px; margin-left:6px;">${escapeHtml(p.note)}</span>` : "";
+  if(editModeIsActive()){
+    const row = el(`
+      <div class="prod-line">
+        <div class="info" style="display:flex; flex-direction:column; gap:5px; flex:1;">
+          <input type="text" value="${attr(p.name)}" data-editname style="background:var(--bg); border:1.5px solid var(--card-border); color:var(--text); border-radius:8px; padding:6px 8px; font-size:13px;">
+          <input type="text" value="${attr(p.note||'')}" placeholder="заметка" data-editnote style="background:var(--bg); border:1.5px solid var(--card-border); color:var(--text-dim); border-radius:8px; padding:6px 8px; font-size:12px;">
+        </div>
+        <button class="btn btn-danger btn-sm" data-delp="${p.id}">✕</button>
+      </div>`);
+    row.querySelector('[data-editname]').addEventListener('change', (e)=>{ p.name = e.target.value; saveSection('procurement'); });
+    row.querySelector('[data-editnote]').addEventListener('change', (e)=>{ p.note = e.target.value; saveSection('procurement'); });
+    row.querySelector('[data-delp]').addEventListener('click', ()=>{
+      if(!confirm(`Удалить товар «${p.name}»?`)) return;
+      sg.products = sg.products.filter(x=>x.id!==p.id);
+      saveSection('procurement').then(render);
+    });
+    return row;
+  }
+  const row = el(`
+    <div class="prod-line ${p.qty>0?'picked':''}">
+      <div class="info"><b>${escapeHtml(p.name)}</b>${noteHtml}</div>
+      <div class="stepper" style="display:flex; align-items:center; gap:6px;">
+        <button class="btn btn-outline btn-sm" data-dec>−</button>
+        <input type="number" min="0" class="qty" value="${p.qty||0}" style="width:44px; text-align:center;">
+        <button class="btn btn-outline btn-sm" data-inc>+</button>
+      </div>
+    </div>`);
+  row.querySelector('[data-inc]').addEventListener('click', async ()=>{ p.qty = (p.qty||0)+1; await saveSection('procurement'); render(); });
+  row.querySelector('[data-dec]').addEventListener('click', async ()=>{ p.qty = Math.max(0,(p.qty||0)-1); await saveSection('procurement'); render(); });
+  row.querySelector('.qty').addEventListener('change', async (e)=>{
+    let v = parseInt(e.target.value,10); if(isNaN(v)||v<0) v=0;
+    p.qty = v; await saveSection('procurement'); render();
+  });
+  return row;
+}
+
+function editModeIsActive(){ return isAdmin && editMode; }
+
+function buildProcOrderText(g){
+  const lines = [];
+  (g.subgroups||[]).forEach(sg=>{
+    const picked = (sg.products||[]).filter(p=>p.qty>0);
+    if(!picked.length) return;
+    if(sg.name) lines.push(sg.name + ":");
+    picked.forEach(p=>{
+      let line = "- " + p.name + " — " + p.qty;
+      if(p.note) line += " (" + p.note + ")";
+      lines.push(line);
+    });
+    if(sg.name) lines.push("");
+  });
+  return lines.join("\n").trim();
+}
+
+function openProcurementOrderSheet(){
+  const groupsWithPicks = DATA.procurement.groups.filter(g=>procGroupPickedCount(g)>0);
+  let body = `<h3>Заказ по поставщикам</h3>`;
+  if(!groupsWithPicks.length){
+    body += `<div class="empty">Пока ничего не отмечено. Вернись назад и укажи количество нужного товара.</div>`;
+  } else {
+    groupsWithPicks.forEach(g=>{
+      const text = buildProcOrderText(g);
+      body += `<div class="card">
+        <h3>${g.icon? g.icon+" ":""}${escapeHtml(g.name)}</h3>
+        <p style="white-space:pre-wrap; font-size:13px;">${escapeHtml(text)}</p>
+        <button class="btn btn-outline btn-sm" data-copy="${g.id}">Скопировать</button>
+      </div>`;
+    });
+  }
+  body += `<div class="modal-actions"><button class="btn btn-outline" id="mCancel" style="flex:1;">Закрыть</button></div>`;
   const overlay = openModal(body);
   overlay.querySelector('#mCancel').addEventListener('click', closeModal);
-  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
-    const name = overlay.querySelector('#f_name').value.trim();
-    if(!name) return;
-    sg.products = sg.products || [];
-    sg.products.push({id:uid(), name, unit:overlay.querySelector('#f_unit').value.trim(), comment:overlay.querySelector('#f_comment').value.trim(), tags:parseTags(overlay.querySelector('#f_tags').value)});
-    await saveSection('procurement'); closeModal(); render();
+  overlay.querySelectorAll('[data-copy]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const g = DATA.procurement.groups.find(x=>x.id===btn.dataset.copy);
+      const text = g.name + "\n\n" + buildProcOrderText(g);
+      try{
+        await navigator.clipboard.writeText(text.trim());
+        const old = btn.textContent; btn.textContent = "Скопировано ✓";
+        setTimeout(()=>{ btn.textContent = old; }, 1600);
+      }catch(e){ alert("Не удалось скопировать автоматически. Текст:\n\n"+text); }
+    });
   });
+  if(groupsWithPicks.length){
+    const resetBtn = el(`<button class="btn btn-danger btn-block" style="margin-top:6px;">Сбросить все количества (после отправки заказа)</button>`);
+    resetBtn.addEventListener('click', async ()=>{
+      if(!confirm("Сбросить все отмеченные количества?")) return;
+      DATA.procurement.groups.forEach(g=>(g.subgroups||[]).forEach(sg=>(sg.products||[]).forEach(p=>p.qty=0)));
+      await saveSection('procurement'); closeModal(); render();
+    });
+    document.getElementById('modal').appendChild(resetBtn);
+  }
 }
 
-function collectShoppingList(){
-  let out = "";
-  DATA.procurement.groups.forEach(g=>{
-    let groupLines = [];
-    (g.subgroups||[]).forEach(sg=>{
-      (sg.products||[]).forEach(p=>{
-        const input = document.querySelector(`.qty[data-pid="${p.id}"]`);
-        const qty = input ? parseFloat(input.value) : 0;
-        if(qty && qty>0){
-          groupLines.push(`— ${p.name}: ${qty}${p.unit? " "+p.unit:""}${p.comment? " ("+p.comment+")":""}`);
-        }
-      });
-    });
-    if(groupLines.length){
-      out += `📦 ${g.name}\n` + groupLines.join("\n") + "\n\n";
-    }
-  });
-  const resultBox = document.getElementById('shopResult');
-  if(!out){ resultBox.classList.add('hidden'); alert("Укажи количество хотя бы для одного товара."); return; }
-  resultBox.textContent = out.trim();
-  resultBox.classList.remove('hidden');
-  resultBox.scrollIntoView({behavior:'smooth', block:'nearest'});
+function openAddGroupModal(){
+  const name = prompt("Название нового поставщика (например: «Хозка», «Пиво», «Мясной цех»):");
+  if(!name || !name.trim()) return;
+  const id = uid();
+  DATA.procurement.groups.push({id, name:name.trim(), icon:"📦", subgroups:[{id:uid(), name:null, products:[]}]});
+  activeProcurementGroupId = id;
+  saveSection('procurement').then(render);
 }
 
 /* ---------- ПИВО ---------- */
@@ -1386,101 +1493,35 @@ function openBeerModal(b){
 let scanner = null;
 let scanCallback = null; // если задан — сканер работает "в режиме выбора" (например для поля штрихкода), иначе ищет цену пива сам
 
-let nativeScanStream = null;
-let nativeScanRAF = null;
-
 async function openScanner(callback){
   scanCallback = callback || null;
+  document.getElementById('reader').innerHTML = "";
   document.getElementById('scanResult').innerHTML = `<div class="empty" style="margin:10px;">Подведи камеру ближе к штрихкоду (~10 см), избегай бликов на упаковке, дай секунду на фокусировку.</div>`;
   document.getElementById('scanOverlay').classList.remove('hidden');
 
-  // Путь 1: нативный BarcodeDetector браузера — но только если он реально умеет
-  // распознавать обычные товарные штрихкоды (EAN/UPC), а не только QR. На части
-  // устройств BarcodeDetector есть, но поддерживает исключительно QR-коды —
-  // тогда лучше сразу использовать запасной вариант, а не тратить время впустую.
-  if(window.BarcodeDetector){
-    try{
-      const supported = await BarcodeDetector.getSupportedFormats();
-      if(supported.includes("ean_13") || supported.includes("upc_a") || supported.includes("code_128")){
-        await startNativeScanner(supported);
-        return;
-      }
-      console.warn("Нативный BarcodeDetector не поддерживает товарные штрихкоды на этом устройстве, используем запасной вариант", supported);
-    }catch(err){
-      console.error("Нативный сканер не сработал, пробуем запасной вариант", err);
-      stopNativeScanner();
-    }
-  }
-
-  // Путь 2 (запасной): библиотека html5-qrcode — без ограничивающей рамки
-  // (сканируем весь кадр целиком, так надёжнее, чем в маленькое окошко),
-  // с явным списком форматов, включённым experimental-флагом использовать
-  // нативный детектор внутри себя, и запросом на непрерывную автофокусировку —
-  // без неё телефон часто фокусируется один раз на старте и потом "мажет".
   if(!window.Html5Qrcode){
     document.getElementById('scanResult').innerHTML = `<div class="empty">Не удалось загрузить модуль сканера. Проверь интернет-соединение.</div>`;
     return;
   }
-  const formats = window.Html5QrcodeSupportedFormats ? [
-    Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.QR_CODE
-  ] : undefined;
-  scanner = new Html5Qrcode("reader", formats? {formatsToSupport: formats} : undefined);
-  const config = {
-    fps: 10,
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-    // qrbox намеренно не задаём — сканируем весь кадр целиком, это надёжнее
-  };
-  const videoConstraints = { facingMode:"environment", width:{ideal:1920}, height:{ideal:1080}, advanced:[{focusMode:"continuous"}] };
-  scanner.start(videoConstraints, config, onScanSuccess).catch(()=>{
-    // на некоторых устройствах advanced-констрейнт focusMode ломает запуск — пробуем без него
-    scanner.start({facingMode:"environment"}, config, onScanSuccess).catch(err=>{
-      document.getElementById('scanResult').innerHTML = `<div class="empty">Нет доступа к камере: ${escapeHtml(String(err))}</div>`;
-    });
-  });
-}
 
-async function startNativeScanner(preSupportedFormats){
-  const readerDiv = document.getElementById('reader');
-  readerDiv.innerHTML = '<video id="nativeScanVideo" playsinline autoplay muted style="width:100%; height:100%; object-fit:cover;"></video>';
-  const video = document.getElementById('nativeScanVideo');
-  const baseConstraints = { facingMode: {ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} };
   try{
-    // непрерывная автофокусировка — критично для близких мелких штрихкодов на упаковке;
-    // без этого камера часто фокусируется один раз при запуске и дальше "мажет"
-    nativeScanStream = await navigator.mediaDevices.getUserMedia({ video: {...baseConstraints, advanced:[{focusMode:"continuous"}]} });
-  }catch(e){
-    nativeScanStream = await navigator.mediaDevices.getUserMedia({ video: baseConstraints });
+    const formats = window.Html5QrcodeSupportedFormats ? [
+      Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.QR_CODE
+    ] : undefined;
+    scanner = new Html5Qrcode("reader", formats? {formatsToSupport: formats, verbose:false} : undefined);
+    const config = {
+      fps: 10,
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      // qrbox намеренно не задаём — сканируем весь кадр целиком, так надёжнее, чем в маленькое окошко
+    };
+    await scanner.start({ facingMode: "environment" }, config, onScanSuccess);
+  }catch(err){
+    console.error("Не удалось запустить сканер", err);
+    document.getElementById('scanResult').innerHTML = `<div class="empty">Нет доступа к камере: ${escapeHtml(String(err && err.message || err))}<br><br>Проверь в настройках телефона, что Telegram (или браузеру) разрешён доступ к камере.</div>`;
   }
-  video.srcObject = nativeScanStream;
-  await video.play();
-
-  const wanted = ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","itf","qr_code"];
-  const supported = (preSupportedFormats || []).filter(f=> wanted.includes(f));
-  const detector = new BarcodeDetector({ formats: supported.length? supported : wanted });
-
-  let stopped = false;
-  async function tick(){
-    if(stopped) return;
-    try{
-      const codes = await detector.detect(video);
-      if(codes && codes.length){
-        onScanSuccess(codes[0].rawValue);
-        if(scanCallback){ stopped = true; return; } // в режиме выбора значения (штрихкод для пива) — одного скана достаточно
-      }
-    }catch(e){ /* игнорируем единичные сбои кадра, пробуем дальше */ }
-    nativeScanRAF = requestAnimationFrame(tick);
-  }
-  tick();
-  // сохраняем способ остановки для closeScanner()
-  scanner = { isNative:true, stop: async ()=>{ stopped=true; if(nativeScanRAF) cancelAnimationFrame(nativeScanRAF); }, clear: ()=>{} };
-}
-
-function stopNativeScanner(){
-  if(nativeScanRAF){ cancelAnimationFrame(nativeScanRAF); nativeScanRAF = null; }
-  if(nativeScanStream){ nativeScanStream.getTracks().forEach(t=>t.stop()); nativeScanStream = null; }
 }
 
 function onScanSuccess(decodedText){
@@ -1501,7 +1542,6 @@ function onScanSuccess(decodedText){
 function closeScanner(){
   document.getElementById('scanOverlay').classList.add('hidden');
   scanCallback = null;
-  stopNativeScanner();
   if(scanner){
     scanner.stop().then(()=>scanner.clear()).catch(()=>{});
     scanner = null;
@@ -1803,6 +1843,136 @@ function openReservationModal(r){
   });
 }
 
+/* ---------- ЧЕК-ЛИСТЫ (галочки только локальные, не синхронизируются) ---------- */
+let collapsedChecklistGroups = {};
+let checklistChecked = {}; // {itemId: true/false} — только localStorage, никогда не уходит в общее хранилище
+
+function loadChecklistChecked(){
+  try{ const raw = localStorage.getItem('barry_checklist_checked_v1'); checklistChecked = raw? JSON.parse(raw) : {}; }
+  catch(e){ checklistChecked = {}; }
+}
+function saveChecklistChecked(){
+  try{ localStorage.setItem('barry_checklist_checked_v1', JSON.stringify(checklistChecked)); }catch(e){}
+}
+function toggleChecklistItem(itemId){
+  checklistChecked[itemId] = !checklistChecked[itemId];
+  saveChecklistChecked();
+  render();
+}
+
+function renderChecklists(main){
+  main.appendChild(el(`<h2 class="section-title">Чек-листы</h2>`));
+  main.appendChild(el(`<div class="banner">Отметки (галочки) хранятся только на этом устройстве и не синхронизируются — так и задумано.</div>`));
+
+  const addGroupBtn = el(`<button class="btn btn-primary btn-sm adminOnly block" style="margin-bottom:12px;">+ Добавить чек-лист (Открытие, Закрытие...)</button>`);
+  addGroupBtn.addEventListener('click', openAddChecklistGroupModal);
+  main.appendChild(addGroupBtn);
+
+  if(DATA.checklists.length===0){
+    main.appendChild(el(`<div class="empty">Пока нет чек-листов.${isAdmin?' Нажми «+», чтобы добавить первый.':''}</div>`));
+    return;
+  }
+
+  DATA.checklists.forEach(g=>{
+    const isCollapsed = !!collapsedChecklistGroups[g.id];
+    const doneCount = (g.items||[]).filter(it=>checklistChecked[it.id]).length;
+    const wrap = el(`<div class="tc-group"></div>`);
+    const head = el(`
+      <div class="tc-group-head ${isCollapsed?'collapsed':''}">
+        <span class="arrow">▼</span>
+        <b>${escapeHtml(g.name)} <span style="opacity:.6; font-weight:400;">(${doneCount}/${(g.items||[]).length})</span></b>
+        <button class="btn btn-outline btn-sm adminOnly tc-group-del" data-editg="${g.id}">✏️</button>
+        <button class="btn btn-danger btn-sm adminOnly tc-group-del" data-delg="${g.id}">Удалить</button>
+      </div>`);
+    const body = el(`<div class="tc-group-body ${isCollapsed?'collapsed':''}"></div>`);
+
+    const addItemBtn = el(`<button class="btn btn-outline btn-sm adminOnly" style="margin-bottom:8px;">+ Пункт в «${escapeHtml(g.name)}»</button>`);
+    addItemBtn.addEventListener('click', ()=> openAddChecklistItemModal(g));
+    body.appendChild(addItemBtn);
+
+    if(!(g.items||[]).length){
+      body.appendChild(el(`<div class="empty">Пока нет пунктов.</div>`));
+    }
+    (g.items||[]).forEach(it=>{
+      const checked = !!checklistChecked[it.id];
+      const line = el(`
+        <div class="checklist-line ${checked?'checked':''}">
+          <span class="checklist-box">${checked?'✓':''}</span>
+          <span class="checklist-text">${escapeHtml(it.text)}</span>
+          <button class="btn btn-danger btn-sm adminOnly" data-delitem="${it.id}">✕</button>
+        </div>`);
+      line.querySelector('.checklist-box').addEventListener('click', ()=> toggleChecklistItem(it.id));
+      line.querySelector('.checklist-text').addEventListener('click', ()=> toggleChecklistItem(it.id));
+      line.querySelector('[data-delitem]')?.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        if(confirm("Удалить пункт?")){
+          g.items = g.items.filter(x=>x.id!==it.id);
+          saveSection('checklists').then(render);
+        }
+      });
+      body.appendChild(line);
+    });
+
+    head.addEventListener('click', (e)=>{
+      if(e.target.closest('[data-delg]') || e.target.closest('[data-editg]')) return;
+      collapsedChecklistGroups[g.id] = !collapsedChecklistGroups[g.id];
+      render();
+    });
+    head.querySelector('[data-editg]')?.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const newName = prompt("Новое название чек-листа:", g.name);
+      if(newName && newName.trim()){ g.name = newName.trim(); saveSection('checklists').then(render); }
+    });
+    head.querySelector('[data-delg]')?.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(confirm(`Удалить чек-лист «${g.name}» со всеми пунктами?`)){
+        DATA.checklists = DATA.checklists.filter(x=>x.id!==g.id);
+        saveSection('checklists').then(render);
+      }
+    });
+
+    wrap.appendChild(head); wrap.appendChild(body);
+    main.appendChild(wrap);
+  });
+}
+
+function openAddChecklistGroupModal(){
+  const body = `
+    <h3>Новый чек-лист</h3>
+    <div class="field"><label>Название (например: «Открытие», «Закрытие»)</label><input type="text" id="f_name"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Добавить</button>
+    </div>`;
+  const overlay = openModal(body);
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const name = overlay.querySelector('#f_name').value.trim();
+    if(!name) return;
+    DATA.checklists.push({id:uid(), name, items:[]});
+    await saveSection('checklists'); closeModal(); render();
+  });
+}
+
+function openAddChecklistItemModal(g){
+  const body = `
+    <h3>Новый пункт в «${escapeHtml(g.name)}»</h3>
+    <div class="field"><label>Текст пункта</label><input type="text" id="f_text"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="mCancel">Отмена</button>
+      <button class="btn btn-primary" id="mSave">Добавить</button>
+    </div>`;
+  const overlay = openModal(body);
+  overlay.querySelector('#mCancel').addEventListener('click', closeModal);
+  overlay.querySelector('#mSave').addEventListener('click', async ()=>{
+    const text = overlay.querySelector('#f_text').value.trim();
+    if(!text) return;
+    g.items = g.items || [];
+    g.items.push({id:uid(), text});
+    await saveSection('checklists'); closeModal(); render();
+  });
+}
+
 /* ==================== ОБЩИЕ ХЕЛПЕРЫ ==================== */
 function upsert(section, item){
   const arr = DATA[section];
@@ -1830,6 +2000,7 @@ function attr(s){ return escapeHtml(s); }
 /* ==================== СТАРТ ==================== */
 (async function start(){
   applyTheme();
+  loadChecklistChecked();
   initTelegram();
   initStorage();
   await loadAllData();
