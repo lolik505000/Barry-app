@@ -713,6 +713,23 @@ function openSettingsModal(){
         <div class="hint" style="margin-bottom:8px;">Пока включено — приложение видят только администраторы, остальные видят заглушку.</div>
         <button class="btn ${maintOn?'btn-danger':'btn-primary'} btn-block" id="mMaint">${maintOn? "Выключить техработы":"Включить техработы"}</button>
       </div>
+      <div class="field" style="border-top:1px solid var(--card-border); padding-top:14px;">
+        <label>Импорт закупок из текстового файла</label>
+        <div class="hint" style="margin-bottom:8px;">
+          Формат: строка «# Название поставщика» — новая группа (например «# Пиво»), «## Название» — подгруппа внутри неё (необязательно, например «## Тёмное»), дальше просто название товара на каждой строке — можно добавить заметку через « | заметка» (например «Jaws Nitro | 0.5 кег»). Существующие поставщики и подгруппы дополняются, ничего не затирается.
+        </div>
+        <input type="file" id="mProcFile" accept=".txt,text/plain">
+      </div>
+      <div class="field">
+        <label>Или вставь текст прямо сюда</label>
+        <textarea id="mProcText" placeholder="# Пиво&#10;## Тёмное&#10;Jaws Nitro&#10;Васька тёмное | 2 ящика"></textarea>
+        <button class="btn btn-outline btn-sm" id="mProcTextImport" style="margin-top:8px;">Импортировать из текста</button>
+      </div>
+      <div class="field">
+        <label>Товары закупок из этого браузера</label>
+        <div class="hint" style="margin-bottom:8px;">Если часть товаров вводилась ещё до подключения общего хранилища — они могли остаться только в этом браузере/устройстве. Кнопка подтянет их и добавит к текущим закупкам (только сами товары закупок — тех.карты, меню и остальное не трогает).</div>
+        <button class="btn btn-outline btn-block" id="mProcLocalRecover">Восстановить закупки из этого браузера</button>
+      </div>
     ` : `
       <div class="field">
         <button class="btn btn-outline btn-block" id="mAdminLogin">Я администратор (ввести Telegram ID)</button>
@@ -728,6 +745,109 @@ function openSettingsModal(){
     await setMaintenance(!maintOn); closeModal();
   });
   overlay.querySelector('#mAdminLogin')?.addEventListener('click', manualAdminLogin);
+
+  overlay.querySelector('#mProcFile')?.addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = async ()=>{
+      await runProcurementTextImport(String(reader.result));
+      e.target.value = "";
+    };
+    reader.readAsText(file, 'utf-8');
+  });
+  overlay.querySelector('#mProcTextImport')?.addEventListener('click', async ()=>{
+    const text = overlay.querySelector('#mProcText').value;
+    if(!text.trim()){ alert("Сначала вставь текст."); return; }
+    await runProcurementTextImport(text);
+  });
+  overlay.querySelector('#mProcLocalRecover')?.addEventListener('click', async ()=>{
+    let raw;
+    try{ raw = localStorage.getItem(SECTION_KEYS.procurement); }catch(e){}
+    if(!raw){ alert("В этом браузере не нашлось сохранённых закупок (localStorage пуст)."); return; }
+    let old;
+    try{ old = JSON.parse(raw); }catch(e){ alert("Не удалось прочитать данные из этого браузера."); return; }
+    const norm = normalizeProcurement(old);
+    if(!norm.groups.length){ alert("В этом браузере не нашлось товаров закупок для восстановления."); return; }
+    const added = mergeProcurementGroups(norm.groups);
+    await saveSection('procurement');
+    alert(added>0? `Готово! Добавлено новых товаров: ${added}.` : "Все товары из этого браузера уже есть в текущих закупках — новых не добавлено.");
+    closeModal(); render();
+  });
+}
+
+async function runProcurementTextImport(text){
+  const groups = parseProcurementImportText(text);
+  if(!groups.length){ alert("Не нашёл в тексте ни одного товара — проверь формат."); return; }
+  const added = mergeProcurementGroups(groups);
+  await saveSection('procurement');
+  alert(added>0? `Готово! Добавлено новых товаров: ${added}.` : "В тексте не нашлось новых товаров — все уже есть в закупках.");
+  closeModal(); render();
+}
+
+// Разбираем текст импорта закупок: "# Группа", "## Подгруппа" (необязательно),
+// дальше просто название товара на строку, через " | " можно приписать заметку.
+function parseProcurementImportText(text){
+  const lines = String(text).split(/\r?\n/);
+  const groups = [];
+  let curGroup = null, curSub = null;
+  lines.forEach(raw=>{
+    const line = raw.trim();
+    if(!line) return;
+    if(line.startsWith('## ')){
+      curSub = {name: line.slice(3).trim(), products: []};
+      if(!curGroup){ curGroup = {name:"Импорт", subgroups:[]}; groups.push(curGroup); }
+      curGroup.subgroups.push(curSub);
+      return;
+    }
+    if(line.startsWith('# ')){
+      curGroup = {name: line.slice(2).trim(), subgroups: []};
+      groups.push(curGroup);
+      curSub = {name: null, products: []};
+      curGroup.subgroups.push(curSub);
+      return;
+    }
+    if(!curGroup){ curGroup = {name:"Импорт", subgroups:[]}; groups.push(curGroup); }
+    if(!curSub){ curSub = {name:null, products:[]}; curGroup.subgroups.push(curSub); }
+    const parts = line.split('|');
+    const name = parts[0].trim();
+    const note = parts.slice(1).join('|').trim();
+    if(name) curSub.products.push({name, note});
+  });
+  return groups;
+}
+
+// Добавляет товары из incomingGroups к текущим закупкам, не затирая существующее:
+// группы/подгруппы сопоставляются по названию (без учёта регистра), товары-дубликаты
+// (по названию внутри той же подгруппы) пропускаются. Возвращает число реально добавленных товаров.
+function mergeProcurementGroups(incomingGroups){
+  let added = 0;
+  incomingGroups.forEach(ig=>{
+    const igName = String(ig.name||"Импорт").trim();
+    let group = DATA.procurement.groups.find(g=> g.name.trim().toLowerCase()===igName.toLowerCase());
+    if(!group){
+      group = {id:uid(), name:igName, icon: ig.icon||"📦", subgroups:[]};
+      DATA.procurement.groups.push(group);
+    }
+    (ig.subgroups||[]).forEach(isg=>{
+      const isgName = isg.name ? String(isg.name).trim() : null;
+      let sub = group.subgroups.find(s=> (s.name? s.name.trim().toLowerCase():null) === (isgName? isgName.toLowerCase():null));
+      if(!sub){
+        sub = {id:uid(), name:isgName, products:[]};
+        group.subgroups.push(sub);
+      }
+      (isg.products||[]).forEach(ip=>{
+        const ipName = String(ip.name||"").trim();
+        if(!ipName) return;
+        const exists = sub.products.some(p=> p.name.trim().toLowerCase()===ipName.toLowerCase());
+        if(!exists){
+          sub.products.push({id:uid(), name:ipName, note: ip.note||"", qty:0});
+          added++;
+        }
+      });
+    });
+  });
+  return added;
 }
 
 /* ==================== НАВИГАЦИЯ ==================== */
